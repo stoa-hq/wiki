@@ -1,0 +1,113 @@
+import { defineConfig } from 'vitepress'
+
+export default defineConfig({
+  title: 'Stoa',
+  description: 'Commerce for humans and agents.',
+  cleanUrls: true,
+  ignoreDeadLinks: true
+
+  head: [
+    ['link', { rel: 'icon', href: '/favicon.ico' }]
+  ],
+
+  themeConfig: {
+    logo: '/logo.svg',
+    siteTitle: 'Stoa',
+
+    nav: [
+      { text: 'Guide', link: '/guide/introduction' },
+      { text: 'API', link: '/api/overview' },
+      { text: 'Plugins', link: '/plugins/overview' },
+      { text: 'MCP', link: '/mcp/overview' },
+      {
+        text: 'v0.1.0',
+        items: [
+          { text: 'Changelog', link: '/changelog' },
+          { text: 'GitHub', link: 'https://github.com/stoa-hq/stoa' }
+        ]
+      }
+    ],
+
+    sidebar: {
+      '/guide/': [
+        {
+          text: 'Getting Started',
+          items: [
+            { text: 'Introduction', link: '/guide/introduction' },
+            { text: 'Quick Start', link: '/guide/quick-start' },
+            { text: 'Configuration', link: '/guide/configuration' },
+            { text: 'Self-Hosting', link: '/guide/self-hosting' },
+          ]
+        },
+        {
+          text: 'Core Concepts',
+          items: [
+            { text: 'Architecture', link: '/guide/architecture' },
+            { text: 'Products & Variants', link: '/guide/products' },
+            { text: 'Orders', link: '/guide/orders' },
+            { text: 'Customers', link: '/guide/customers' },
+          ]
+        },
+        {
+          text: 'Admin Panel',
+          items: [
+            { text: 'Overview', link: '/guide/admin' },
+            { text: 'Demo Storefront', link: '/guide/storefront' },
+          ]
+        }
+      ],
+
+      '/api/': [
+        {
+          text: 'REST API',
+          items: [
+            { text: 'Overview', link: '/api/overview' },
+            { text: 'Authentication', link: '/api/authentication' },
+            { text: 'Products', link: '/api/products' },
+            { text: 'Orders', link: '/api/orders' },
+            { text: 'Customers', link: '/api/customers' },
+            { text: 'Cart', link: '/api/cart' },
+          ]
+        }
+      ],
+
+      '/plugins/': [
+        {
+          text: 'Plugin System',
+          items: [
+            { text: 'Overview', link: '/plugins/overview' },
+            { text: 'Creating a Plugin', link: '/plugins/creating' },
+            { text: 'Plugin API', link: '/plugins/api' },
+            { text: 'Payment Providers', link: '/plugins/payment' },
+            { text: 'Shipping Providers', link: '/plugins/shipping' },
+          ]
+        }
+      ],
+
+      '/mcp/': [
+        {
+          text: 'MCP',
+          items: [
+            { text: 'Overview', link: '/mcp/overview' },
+            { text: 'Setup', link: '/mcp/setup' },
+            { text: 'Available Tools', link: '/mcp/tools' },
+            { text: 'Agent Examples', link: '/mcp/examples' },
+          ]
+        }
+      ]
+    },
+
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/stoa-hq/stoa' }
+    ],
+
+    footer: {
+      message: 'Released under the MIT License.',
+      copyright: 'Copyright © 2025 Stoa Contributors'
+    },
+
+    search: {
+      provider: 'local'
+    }
+  }
+})
