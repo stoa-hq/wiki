@@ -1,47 +1,115 @@
-# MCP Overview
+# API Overview
 
-Stoa ships with a built-in **Model Context Protocol (MCP)** server, making it natively compatible with AI agents and assistants like Claude, GPT, and others.
+Stoa exposes a REST API at `/api/v1`. All responses are JSON.
 
-## What is MCP?
+## Endpoints
 
-[Model Context Protocol](https://modelcontextprotocol.io) is an open standard that allows AI models to interact with external tools and systems in a structured way. Think of it as a universal API layer between AI agents and the real world.
+| Area | Path | Authentication |
+|------|------|----------------|
+| Admin API | `/api/v1/admin/*` | JWT (admin role) or API key with permissions |
+| Store API | `/api/v1/store/*` | Public / customer JWT / API key |
+| Auth | `/api/v1/auth/*` | None |
+| Health | `/api/v1/health` | None |
 
-## What can agents do with Stoa?
+## Authentication
 
-Out of the box, a connected agent can:
+### JWT (Admin login)
 
-| Tool | Description |
-|------|-------------|
-| `stoa_search_products` | Search the product catalog by query, category, price range |
-| `stoa_get_product` | Get full details for a specific product |
-| `stoa_add_to_cart` | Add a product to a cart |
-| `stoa_get_cart` | Get the current cart contents |
-| `stoa_remove_from_cart` | Remove an item from the cart |
-| `stoa_checkout` | Complete a purchase |
-| `stoa_get_order` | Look up an order by ID |
-| `stoa_list_categories` | List all product categories |
+```bash
+# Login
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "admin@example.com", "password": "your-password"}'
 
-## Example: An agent completes a purchase
-
-```
-User: "Buy me the cheapest wireless headphones you have."
-
-Agent → stoa_search_products({ query: "wireless headphones", sort: "price_asc" })
-     ← [{ id: "prod_xk9f2", name: "AirBuds Pro", price: 49.99 }, ...]
-
-Agent → stoa_add_to_cart({ product_id: "prod_xk9f2", quantity: 1 })
-     ← { cart_id: "cart_abc123", total: 49.99 }
-
-Agent → stoa_checkout({ cart_id: "cart_abc123", payment: "stripe" })
-     ← { order_id: "ord_789", status: "confirmed" }
-
-Agent: "Done! I ordered the AirBuds Pro for €49.99. Order #ord_789."
+# Response contains access_token and refresh_token
+# Use access_token in the Authorization header:
+curl http://localhost:8080/api/v1/admin/products \
+  -H 'Authorization: Bearer <access_token>'
 ```
 
-No custom integration code. No scraping. No fragile browser automation.
+### API Keys
 
-## Next Steps
+API keys are for programmatic access (MCP servers, integrations, scripts).
 
-- [MCP Setup](/mcp/setup) — enable and configure the MCP server
-- [Available Tools](/mcp/tools) — full reference for all MCP tools
-- [Agent Examples](/mcp/examples) — real-world agent interaction examples
+```bash
+# Authenticate with an API key:
+curl http://localhost:8080/api/v1/admin/products \
+  -H 'Authorization: ApiKey ck_your_api_key_here'
+```
+
+API keys are managed through the admin API. Only `super_admin` and `admin` roles can create them.
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"your-password"}' | jq -r '.data.access_token')
+
+curl -X POST http://localhost:8080/api/v1/admin/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "My Integration Key",
+    "permissions": [
+      "products.read", "orders.read", "customers.read"
+    ]
+  }'
+
+# Save the "key" field from the response — it is shown only once!
+```
+
+## Available Permissions
+
+| Scope | Permissions |
+|-------|-------------|
+| Products | `products.read`, `products.create`, `products.update`, `products.delete` |
+| Orders | `orders.read`, `orders.update` |
+| Discounts | `discounts.read`, `discounts.create`, `discounts.update`, `discounts.delete` |
+| Customers | `customers.read`, `customers.update`, `customers.delete` |
+| Categories | `categories.read`, `categories.create`, `categories.update` |
+| Media | `media.read`, `media.delete` |
+| Shipping | `shipping.read` |
+| Payment | `payment.read` |
+| Tax | `tax.read` |
+| Audit | `audit.read` |
+
+## Project Structure
+
+```
+stoa/
+├── cmd/
+│   ├── stoa/               # CLI entry point (main.go)
+│   ├── stoa-store-mcp/     # Store MCP Server (shopping)
+│   └── stoa-admin-mcp/     # Admin MCP Server (management)
+├── internal/
+│   ├── app/                # Application bootstrapping
+│   ├── config/             # Configuration loading
+│   ├── server/             # HTTP server, router, middleware
+│   ├── auth/               # JWT, RBAC, API keys, permissions
+│   ├── database/           # DB connection, migration runner
+│   ├── domain/             # Business logic (DDD-style)
+│   │   ├── product/        # Products, variants, property groups
+│   │   ├── category/       # Categories (tree structure)
+│   │   ├── order/          # Orders
+│   │   ├── cart/           # Shopping cart
+│   │   ├── customer/       # Customer management
+│   │   ├── media/          # Media uploads
+│   │   ├── discount/       # Discounts
+│   │   ├── shipping/       # Shipping methods
+│   │   ├── payment/        # Payment methods
+│   │   └── ...
+│   ├── mcp/                # Shared MCP infrastructure
+│   │   ├── store/          # Store MCP tools (16)
+│   │   └── admin/          # Admin MCP tools (33)
+│   ├── admin/              # Embedded admin frontend (//go:embed)
+│   └── storefront/         # Embedded storefront (//go:embed)
+├── admin/                  # Admin frontend (SvelteKit)
+├── storefront/             # Storefront (SvelteKit)
+├── migrations/             # SQL migrations
+├── pkg/sdk/                # Plugin SDK
+├── Dockerfile
+├── docker-compose.yaml
+├── Makefile
+└── config.example.yaml
+```
+
+Every domain follows the same pattern: `entity.go`, `repository.go`, `postgres.go`, `service.go`, `handler.go`, `dto.go`.
