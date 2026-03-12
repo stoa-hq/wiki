@@ -1,11 +1,11 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'Stoa',
+  title: 'StoA Docs',
   description: 'Commerce for humans and agents.',
   cleanUrls: true,
   ignoreDeadLinks: true,
-  base: '/wiki',
+  base: '/docs',
 
   head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }]
@@ -81,6 +81,7 @@ export default defineConfig({
             { text: 'Plugin API', link: '/plugins/api' },
             { text: 'Payment Providers', link: '/plugins/payment' },
             { text: 'Shipping Providers', link: '/plugins/shipping' },
+            { text: 'n8n Workflows', link: '/plugins/n8n' },
           ]
         }
       ],
@@ -103,7 +104,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the MIT License.',
+      message: 'Released under the APACHE 2.0 License.',
       copyright: 'Copyright © 2025 Stoa Contributors'
     },
 
