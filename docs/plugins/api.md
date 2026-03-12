@@ -141,6 +141,69 @@ type BaseEntity struct {
 }
 ```
 
+## MCPStorePlugin
+
+Plugins can register additional tools on the **Store MCP server** by implementing the optional `MCPStorePlugin` interface:
+
+```go
+type MCPStorePlugin interface {
+    Plugin
+    RegisterStoreMCPTools(server any, client StoreAPIClient)
+}
+```
+
+`RegisterStoreMCPTools` is called once at Store MCP server startup, after the built-in core tools are registered. The `server` parameter is `*github.com/mark3labs/mcp-go/server.MCPServer` (typed as `any` to avoid import cycles in the SDK). The `client` parameter implements `StoreAPIClient`.
+
+### StoreAPIClient
+
+A minimal HTTP client interface for making calls to the Stoa store API:
+
+```go
+type StoreAPIClient interface {
+    Get(path string) ([]byte, error)
+    Post(path string, body interface{}) ([]byte, error)
+}
+```
+
+Using this interface instead of the concrete `internal/mcp.StoaClient` means plugins do not need to import any internal Stoa packages.
+
+### Example
+
+```go
+package myplugin
+
+import (
+    "context"
+
+    "github.com/mark3labs/mcp-go/mcp"
+    "github.com/mark3labs/mcp-go/server"
+    "github.com/stoa-hq/stoa/pkg/sdk"
+)
+
+// RegisterStoreMCPTools implements sdk.MCPStorePlugin.
+func (p *Plugin) RegisterStoreMCPTools(srv any, client sdk.StoreAPIClient) {
+    s := srv.(*server.MCPServer)
+
+    tool := mcp.NewTool("store_my_action",
+        mcp.WithDescription("Does something useful for agents"),
+        mcp.WithString("order_id", mcp.Required()),
+    )
+    s.AddTool(tool, func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+        data, err := client.Post("/plugins/myplugin/action", map[string]interface{}{
+            "order_id": req.GetString("order_id", ""),
+        })
+        if err != nil {
+            return mcp.NewToolResultError(err.Error()), nil
+        }
+        return mcp.NewToolResultText(string(data)), nil
+    })
+}
+```
+
+::: tip Plugin installer keeps both binaries in sync
+`stoa plugin install` writes `plugins_generated.go` into both `cmd/stoa/` and `cmd/stoa-store-mcp/`, so your plugin's `init()` runs in the Store MCP server process as well. Both files are gitignored.
+:::
+
 ## Custom Endpoints
 
 Plugins can register routes on the Chi router:

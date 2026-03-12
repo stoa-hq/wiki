@@ -101,6 +101,51 @@ func (p *Plugin) Init(app *sdk.AppContext) error {
 }
 ```
 
+## 6. Add Store MCP tools (optional)
+
+If your plugin needs to expose tools to AI agents via the **Store MCP server**, implement the `MCPStorePlugin` interface. This is separate from the HTTP routes registered in `Init` — it targets the MCP protocol used by Claude and other agents.
+
+```go
+package myplugin
+
+import (
+    "context"
+
+    "github.com/mark3labs/mcp-go/mcp"
+    "github.com/mark3labs/mcp-go/server"
+    "github.com/stoa-hq/stoa/pkg/sdk"
+)
+
+// RegisterStoreMCPTools implements sdk.MCPStorePlugin.
+// Called once at Store MCP server startup after core tools are registered.
+func (p *Plugin) RegisterStoreMCPTools(srv any, client sdk.StoreAPIClient) {
+    s := srv.(*server.MCPServer)
+
+    tool := mcp.NewTool("store_my_plugin_action",
+        mcp.WithDescription("Describe what the agent can do with this tool"),
+        mcp.WithString("order_id",
+            mcp.Description("UUID of the order"),
+            mcp.Required(),
+        ),
+    )
+    s.AddTool(tool, func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+        data, err := client.Post("/plugins/myplugin/action", map[string]interface{}{
+            "order_id": req.GetString("order_id", ""),
+        })
+        if err != nil {
+            return mcp.NewToolResultError(err.Error()), nil
+        }
+        return mcp.NewToolResultText(string(data)), nil
+    })
+}
+```
+
+The `client` parameter (`sdk.StoreAPIClient`) makes authenticated HTTP requests to the Stoa API — the same server your plugin registered routes on in `Init`. No internal packages need to be imported.
+
+::: info No changes to the MCP server binary needed
+The Store MCP binary discovers `MCPStorePlugin` implementations automatically at startup. Installing your plugin with `stoa plugin install` is enough.
+:::
+
 ## Error handling
 
 If `Init` returns an error, the plugin is not registered and the error is propagated — Stoa will not start.
