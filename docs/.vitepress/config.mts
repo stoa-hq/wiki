@@ -83,6 +83,7 @@ export default defineConfig({
             { text: 'Payment Providers', link: '/plugins/payment' },
             { text: 'Shipping Providers', link: '/plugins/shipping' },
             { text: 'n8n Workflows', link: '/plugins/n8n' },
+            { text: 'Stripe Payments', link: '/plugins/stripe' },
           ]
         }
       ],
