@@ -55,6 +55,10 @@ plugins:
     webhook_base_url: "http://n8n:5678/webhook/stoa"
     secret: "change-me-to-a-strong-secret"
     timeout_seconds: 10   # optional, default: 10
+    hooks:                 # optional — omit to forward all events
+      - "order.after_create"
+      - "order.after_update"
+      - "payment.after_complete"
 ```
 
 | Key | Required | Description |
@@ -62,6 +66,11 @@ plugins:
 | `webhook_base_url` | Yes | Base URL of your n8n instance. Each event is sent to `{base_url}/{event_name}` |
 | `secret` | Yes | Shared HMAC-SHA256 signing secret |
 | `timeout_seconds` | No | HTTP timeout for webhook calls (default: `10`) |
+| `hooks` | No | List of after-hook names to forward. Omit to forward all 16 events (default) |
+
+::: tip Reduce log noise
+If you only have a few n8n workflows, set `hooks` to exactly those events. This prevents unnecessary webhook calls to non-existent n8n endpoints, which would otherwise produce `"webhook dispatch failed"` log entries.
+:::
 
 ## Forwarded events
 

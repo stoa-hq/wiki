@@ -21,7 +21,7 @@ export default defineConfig({
       { text: 'Plugins', link: '/plugins/overview' },
       { text: 'MCP', link: '/mcp/overview' },
       {
-        text: 'v0.2.3',
+        text: 'v0.2.4',
         items: [
           { text: 'Changelog', link: '/changelog' },
           { text: 'GitHub', link: 'https://github.com/stoa-hq/stoa' }
@@ -78,6 +78,7 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/plugins/overview' },
             { text: 'Installing Plugins', link: '/plugins/installing' },
+            { text: 'Docker Installation', link: '/plugins/docker-installation' },
             { text: 'Creating a Plugin', link: '/plugins/creating' },
             { text: 'Plugin API', link: '/plugins/api' },
             { text: 'UI Extensions', link: '/plugins/ui-extensions' },
