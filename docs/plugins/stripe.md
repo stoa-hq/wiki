@@ -316,6 +316,54 @@ Hook event entity payload:
 }
 ```
 
+## Metadata & Cross-Referencing
+
+Every PaymentIntent created by the Stripe plugin is enriched with human-readable order data for easy cross-referencing between Stoa and the Stripe Dashboard.
+
+### PaymentIntent metadata
+
+| Key | Example | Description |
+|-----|---------|-------------|
+| `stoa_order_id` | `018e1b2c-...` | Stoa order UUID |
+| `stoa_payment_method_id` | `018e1b2c-...` | Stoa PaymentMethod UUID |
+| `stoa_order_number` | `ORD-20260315-A1B2C` | Human-readable order number |
+
+### Description & receipt email
+
+The plugin also sets:
+
+- **`description`**: `"Stoa Order ORD-20260315-A1B2C"` — visible in the Stripe Dashboard payment detail view.
+- **`receipt_email`**: The email from the order's billing address (if available). Stripe sends an automatic payment receipt to this address.
+
+::: tip Automatic receipts
+To receive Stripe payment receipts, ensure that the billing address in your checkout form includes an email field. If no email is provided, Stripe skips the receipt — no error occurs.
+:::
+
+### Admin Panel — Dashboard link
+
+In the Stoa Admin Panel, the `provider_reference` column in the order transaction table is rendered as a clickable link for Stripe PaymentIntents (`pi_...`). The link opens the corresponding payment directly in the Stripe Dashboard.
+
+- **Test mode**: `https://dashboard.stripe.com/test/payments/pi_xxx`
+- **Live mode**: `https://dashboard.stripe.com/payments/pi_xxx`
+
+The plugin auto-detects the mode from the configured `publishable_key`. If the Stripe plugin is not installed, the reference is shown as plain text (graceful degradation).
+
+### Transaction lifecycle
+
+When a PaymentIntent is created, the plugin immediately inserts a **pending** transaction into `payment_transactions`. This makes the transaction visible in the Admin Panel right away — even before the customer completes payment.
+
+| Event | Transaction status |
+|-------|--------------------|
+| PaymentIntent created | `pending` |
+| `payment_intent.succeeded` webhook | `completed` |
+| `payment_intent.payment_failed` webhook | `failed` |
+
+The webhook uses `ON CONFLICT DO UPDATE` on `provider_reference` to update the existing pending transaction rather than creating a duplicate.
+
+::: info Existing transactions
+Only new PaymentIntents are enriched with metadata, description, and receipt email. Previously created transactions are not retroactively updated.
+:::
+
 ## Order status transitions
 
 | Event | From | To |
@@ -357,6 +405,12 @@ Stripe may deliver webhook events more than once (retries on network errors, tim
 ### Webhook signature verification
 
 All webhook requests are verified using HMAC-SHA256 with the `webhook_secret` before any processing occurs. The raw request body is used for verification (not re-serialized JSON), which is required for correct signature matching.
+
+### CSRF exemption
+
+Stoa's global CSRF middleware (Double Submit Cookie pattern) automatically exempts all paths under `/plugins/`. Plugin webhook endpoints authenticate via provider-specific signatures (e.g. Stripe HMAC-SHA256), not cookies or CSRF tokens. This exemption is necessary because external services like Stripe cannot send CSRF tokens or cookies with webhook requests.
+
+Requests with an `Authorization` header (Bearer / ApiKey) are also exempt from CSRF by design, as cross-origin requests cannot inject custom headers.
 
 ## Error behaviour
 
@@ -499,3 +553,22 @@ Verwende diese Kartennummern im Testmodus:
 | `4000 0000 0000 9995` | Zahlung abgelehnt |
 
 Beliebiges Ablaufdatum in der Zukunft und beliebige CVC. Weitere Testkarten in der [Stripe Testing-Dokumentation](https://stripe.com/docs/testing).
+
+### Webhook Troubleshooting
+
+Wenn Webhooks in der lokalen Entwicklung nicht ankommen, prüfe folgende Punkte:
+
+| Symptom | Ursache | Lösung |
+|---------|---------|--------|
+| `[403]` im `stripe listen` Output | CSRF-Middleware blockt den Request | Stoa Version mit `/plugins/`-CSRF-Exemption verwenden |
+| `[415]` im `stripe listen` Output | Content-Type `application/json; charset=utf-8` wird abgelehnt | Stoa aktualisieren — Content-Type-Prüfung akzeptiert jetzt `charset`-Parameter |
+| `[401]` + `signature verification failed` in Logs | `webhook_secret` stimmt nicht mit `stripe listen` Secret überein | Secret aus `stripe listen`-Output in `config.yaml` übernehmen und Stoa neu starten |
+| Kein POST in Stoa-Logs | `stripe listen` läuft nicht oder falscher Port | `stripe listen --forward-to http://localhost:8080/plugins/stripe/webhook` starten |
+| Transaction bleibt `pending` | Webhook kommt nicht durch | `stripe listen`-Output auf HTTP-Statuscode prüfen (muss `[204]` sein) |
+
+::: warning Webhook-Secret synchron halten
+`stripe listen` generiert bei **jedem Start** ein neues `whsec_...`-Secret. Dieses muss exakt mit dem `webhook_secret` in deiner `config.yaml` übereinstimmen. Nach jedem Neustart von `stripe listen`:
+1. Secret aus dem Terminal-Output kopieren
+2. In `config.yaml` unter `plugins.stripe.webhook_secret` eintragen
+3. Stoa-Server neu starten
+:::
