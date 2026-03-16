@@ -21,7 +21,7 @@ export default defineConfig({
       { text: 'Plugins', link: '/plugins/overview' },
       { text: 'MCP', link: '/mcp/overview' },
       {
-        text: 'v0.2.5',
+        text: 'v0.3.0',
         items: [
           { text: 'Changelog', link: '/changelog' },
           { text: 'GitHub', link: 'https://github.com/stoa-hq/stoa' }
@@ -47,6 +47,7 @@ export default defineConfig({
             { text: 'Products & Variants', link: '/guide/products' },
             { text: 'Orders', link: '/guide/orders' },
             { text: 'Customers', link: '/guide/customers' },
+            { text: 'Warehouses & Stock', link: '/guide/warehouses' },
           ]
         },
         {
@@ -68,6 +69,7 @@ export default defineConfig({
             { text: 'Orders', link: '/api/orders' },
             { text: 'Customers', link: '/api/customers' },
             { text: 'Cart', link: '/api/cart' },
+            { text: 'Warehouses', link: '/api/warehouses' },
           ]
         }
       ],

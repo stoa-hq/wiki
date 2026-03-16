@@ -8,35 +8,32 @@ The Stripe plugin supports two checkout flows:
 
 ### Pay-First Flow (recommended) {#pay-first}
 
-Payment is completed **before** the order is created. This prevents unpaid orders.
+Payment is **authorized** before the order is created. Stoa then captures the funds once the order reaches the configured capture status. This prevents unpaid orders and eliminates refund-on-failure scenarios.
 
 ```
 Agent / Frontend
     │
     │  1. store_stripe_create_preorder_payment_intent(amount, currency, payment_method_id)
-    │     → creates Stripe PaymentIntent (pre-order mode)
+    │     → creates Stripe PaymentIntent (capture_method: manual)
     │
     ▼
 Stripe
-    │  Customer confirms payment (Stripe.js / mobile SDK)
+    │  Customer authorizes payment (Stripe.js / mobile SDK)
+    │  → PaymentIntent status: requires_capture  (funds held, not charged)
     │
     ▼
 Agent / Frontend
     │
     │  2. store_checkout(..., payment_reference: "pi_xxx")
-    │     → validates PaymentIntent status via checkout.before hook
+    │     → checkout.before: validates PI status (requires_capture ✓)
     │     → creates Order (status: pending)
-    │     → webhook later transitions to confirmed
+    │     → checkout.after: captures PI + creates TX + pending → confirmed
     │
     ▼
-POST /plugins/stripe/webhook (payment_intent.succeeded)
-    │
-    ▼
-stoa-plugin-stripe
-    ├── Creates payment_transaction (status: completed)
-    ├── Transitions Order: pending → confirmed
-    └── Fires payment.after_complete hook
+Order status: confirmed, payment_transaction: completed
 ```
+
+If checkout fails (e.g. insufficient stock), the PaymentIntent is **cancelled** — no money was ever charged, so no refund is needed.
 
 ### Legacy Flow (post-order) {#legacy-flow}
 
@@ -53,7 +50,7 @@ Stripe → webhook → confirmed
 ```
 
 ::: warning Pay-First is recommended
-The legacy flow allows orders without payment. With the pay-first flow, the `payment_reference` is validated via the `checkout.before` hook — the Stripe plugin verifies the PaymentIntent status is `succeeded` before the order is created.
+The legacy flow allows orders without payment. With the pay-first flow, the `payment_reference` is validated via the `checkout.before` hook — the Stripe plugin verifies the PaymentIntent status is `requires_capture` (or `succeeded`) before the order is created.
 :::
 
 ## Installation
@@ -79,6 +76,7 @@ plugins:
     publishable_key: "pk_live_..."      # or pk_test_...
     webhook_secret:  "whsec_..."        # from Stripe Dashboard → Webhooks
     currency:        "EUR"              # optional, default: EUR
+    capture_on:      "confirmed"        # optional, default: "confirmed" — see Authorize & Capture
 ```
 
 | Key | Required | Description |
@@ -87,6 +85,7 @@ plugins:
 | `publishable_key` | Yes | Stripe publishable key (`pk_live_...` or `pk_test_...`) |
 | `webhook_secret` | Yes | Webhook signing secret from the Stripe Dashboard (`whsec_...`) |
 | `currency` | No | Default ISO 4217 currency code (default: `EUR`) |
+| `capture_on` | No | Order status that triggers payment capture (default: `"confirmed"`). Set to any valid order status, e.g. `"shipped"`, for deferred capture. See [Authorize & Capture](#authorize-capture). |
 
 ::: warning Keep your secret key private
 Never expose `secret_key` in frontend code or commit it to version control. Use environment variables: `STOA_PLUGINS_STRIPE_SECRET_KEY=sk_live_...`
@@ -350,13 +349,14 @@ Full end-to-end purchase with Claude (or any MCP-compatible agent):
 
 7. store_stripe_create_preorder_payment_intent(amount, currency, payment_method_id)
    → returns payment_intent_id + client_secret
+   → PI status: requires_capture (funds held, not yet charged)
 
-8. User confirms payment via Stripe.js / mobile SDK using client_secret
+8. User authorizes payment via Stripe.js / mobile SDK using client_secret
 
 9. store_checkout(cart_id, shipping_method_id, payment_method_id, shipping_address,
                   payment_reference: payment_intent_id)
-   → Stripe plugin validates PI is "succeeded" via checkout.before hook
-   → returns order (status: pending → confirmed via webhook)
+   → Stripe plugin validates PI is "requires_capture" via checkout.before hook
+   → Order created → capture triggered → order confirmed
 ```
 
 ### Legacy Flow
@@ -397,6 +397,91 @@ Hook event entity payload:
   "currency": "eur"
 }
 ```
+
+## Authorize & Capture {#authorize-capture}
+
+The pay-first flow uses Stripe's **manual capture** model (`capture_method: manual`). The customer's card is **authorized** (funds held) but **not charged** until Stoa explicitly captures the payment. This has two benefits:
+
+1. **No refunds on failure** — if checkout fails (e.g. stock runs out), the authorization is simply cancelled. No money was moved, so no refund is needed.
+2. **Deferred capture** — you can delay the actual charge until a later order status (e.g. `shipped`), which is the industry standard for physical goods.
+
+### capture_on configuration
+
+The `capture_on` config key controls when Stoa captures the payment:
+
+| Value | Behaviour |
+|-------|-----------|
+| `"confirmed"` (default) | Captured immediately in the `checkout.after` hook, right after the order is created |
+| Any order status string (e.g. `"shipped"`) | Captured when the order is transitioned to that status via `UpdateStatus` |
+
+```yaml
+plugins:
+  stripe:
+    capture_on: "shipped"   # charge the card only when the order ships
+```
+
+### How deferred capture works
+
+```
+CaptureOn = "shipped":
+
+1. store_stripe_create_preorder_payment_intent(...)
+   → PI status: requires_capture  (funds held, not charged)
+
+2. store_checkout(..., payment_reference: "pi_xxx")
+   → PI status validated ✓ (requires_capture accepted)
+   → Order created → payment_transaction: pending → order: confirmed
+   → No capture yet — card not charged
+
+3. Admin transitions order to "shipped"
+   → HookAfterOrderUpdate fires
+   → Stripe plugin: CapturePaymentIntent("pi_xxx")
+   → payment_transaction status → completed
+```
+
+::: info Stripe authorization window
+Stripe authorizations expire after **7 days** by default. If your fulfillment process can take longer than 7 days, consider extending it in the Stripe Dashboard or using `"confirmed"` capture to charge immediately at order time.
+:::
+
+## Checkout Failure & Payment Cancellation
+
+When the [pay-first flow](#pay-first) is used and checkout fails — for example because an item ran out of stock — the PaymentIntent is **cancelled** rather than refunded. Since `capture_method: manual` is always used, **no money was ever moved**, so a refund is unnecessary.
+
+Stoa fires a `checkout.after_failed` hook when `POST /api/v1/store/checkout` returns `422 insufficient_stock`. The Stripe plugin listens to this hook and automatically **cancels** the PaymentIntent.
+
+### Flow
+
+```
+1. store_stripe_create_preorder_payment_intent(...)
+   → PaymentIntent created, customer authorizes → status: "requires_capture"
+
+2. store_checkout(..., payment_reference: "pi_xxx")
+   → checkout.before hook: PI status validated ✓
+   → service.Create(): stock check fails → ErrInsufficientStock
+   → checkout.after_failed hook fires
+       └─ Stripe plugin: CancelPaymentIntent("pi_xxx")
+              → authorization released, card never charged
+   → handler returns 422 insufficient_stock to the client
+```
+
+### Behaviour
+
+- The cancellation is **non-blocking**: if the Stripe API call fails, the error is logged but the `422` response to the customer is still sent normally.
+- The hook only triggers for `provider = "stripe"` — other payment methods are unaffected.
+- If `payment_reference` is empty (manual payment method), no cancellation attempt is made.
+- Partial stock failures (some items unavailable) also trigger the full cancellation, since the entire order is rejected.
+
+::: tip Check your Stripe Dashboard
+After a failed checkout, the cancelled authorization appears in your [Stripe Dashboard → Payments](https://dashboard.stripe.com/payments) immediately. No funds were moved — the hold on the customer's card is released.
+:::
+
+::: warning Monitoring
+Cancellation failures are logged at `ERROR` level:
+```
+{"level":"error","plugin":"stripe","payment_intent_id":"pi_xxx","message":"stripe: failed to cancel payment intent after checkout failure"}
+```
+Monitor your application logs or set up alerting for this message pattern.
+:::
 
 ## Metadata & Cross-Referencing
 
@@ -443,15 +528,28 @@ The plugin auto-detects the mode from the configured `publishable_key`. If the S
 
 ### Transaction lifecycle
 
-When a PaymentIntent is created, the plugin immediately inserts a **pending** transaction into `payment_transactions`. This makes the transaction visible in the Admin Panel right away — even before the customer completes payment.
+The transaction lifecycle depends on the configured `capture_on` value.
+
+**`capture_on: "confirmed"` (default):**
 
 | Event | Transaction status |
 |-------|--------------------|
-| PaymentIntent created | `pending` |
-| `payment_intent.succeeded` webhook | `completed` |
-| `payment_intent.payment_failed` webhook | `failed` |
+| `checkout.after` hook (order confirmed) | `completed` |
+| `checkout.after_failed` hook | No transaction created; PI cancelled |
 
-The webhook uses `ON CONFLICT DO UPDATE` on `provider_reference` to update the existing pending transaction rather than creating a duplicate.
+**`capture_on: "shipped"` (or any other status):**
+
+| Event | Transaction status |
+|-------|--------------------|
+| `checkout.after` hook (order confirmed) | `pending` (authorization held) |
+| Order transitions to `"shipped"` | `completed` (captured) |
+| `checkout.after_failed` hook | No transaction created; PI cancelled |
+
+The upsert uses `ON CONFLICT DO UPDATE` on `provider_reference` to safely update an existing pending transaction rather than creating a duplicate.
+
+::: info Webhook vs. checkout.after
+For pre-order (pay-first) PaymentIntents, the transaction and order confirmation are handled in the `checkout.after` hook — not via webhook. The `payment_intent.succeeded` webhook recognizes `stoa_mode: "pre_order"` and skips the order update to avoid double-processing.
+:::
 
 ::: info Existing transactions
 Only new PaymentIntents are enriched with metadata, description, and receipt email. Previously created transactions are not retroactively updated.
@@ -461,8 +559,9 @@ Only new PaymentIntents are enriched with metadata, description, and receipt ema
 
 | Event | From | To |
 |-------|------|----|
-| `payment_intent.succeeded` | `pending` | `confirmed` |
-| `payment_intent.payment_failed` | — | no change (transaction recorded) |
+| `checkout.after` hook (pay-first) | `pending` | `confirmed` |
+| `payment_intent.succeeded` webhook (legacy flow) | `pending` | `confirmed` |
+| `payment_intent.payment_failed` webhook | — | no change (transaction recorded as failed) |
 
 ## Prerequisites
 

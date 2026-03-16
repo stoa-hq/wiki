@@ -166,6 +166,15 @@ Stoa automatically initialises every plugin that called `sdk.Register()` on star
 | `checkout.after` | After checkout completion | No |
 | `payment.after_complete` | After successful payment | No |
 | `payment.after_failed` | After failed payment | No |
+| `warehouse.before_create` | Before warehouse creation | Yes |
+| `warehouse.after_create` | After warehouse creation | No |
+| `warehouse.before_update` | Before warehouse update | Yes |
+| `warehouse.after_update` | After warehouse update | No |
+| `warehouse.before_delete` | Before warehouse deletion | Yes |
+| `warehouse.after_delete` | After warehouse deletion | No |
+| `warehouse.before_stock_update` | Before manual stock change | Yes |
+| `warehouse.after_stock_update` | After manual stock change | No |
+| `warehouse.after_stock_deduct` | After order stock deduction | No |
 
 **Before-hooks** execute before the database operation and can cancel it by returning an error. **After-hooks** execute afterwards — errors are only logged and do not abort the operation.
 

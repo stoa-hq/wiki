@@ -166,4 +166,12 @@ For manual payment methods (where `provider` is empty), `payment_reference` is o
 
 **Checkout Hooks:**
 
-Plugins can register `checkout.before` hooks to validate or reject checkouts. The hook receives metadata including `provider` and `payment_reference`, allowing provider plugins to verify payment completion. After-hooks (`checkout.after`) fire after order creation for post-order actions. See [Orders Guide](/guide/orders#checkout-hooks) for details.
+Plugins can register `checkout.before` hooks to validate or reject checkouts. The hook receives metadata including `provider` and `payment_reference`, allowing provider plugins to verify payment completion. After-hooks (`checkout.after`) fire after order creation for post-order actions.
+
+| Hook | Fires when | Fatal? |
+|------|------------|--------|
+| `checkout.before` | Before `service.Create()` — can abort checkout | Yes (returns error → 422) |
+| `checkout.after` | After successful order creation | No (errors are logged) |
+| `checkout.after_failed` | After `service.Create()` fails with `insufficient_stock` | No (errors are logged) |
+
+The `checkout.after_failed` hook enables payment plugins to automatically refund a captured payment when stock runs out after the payment was already confirmed. See the [Stripe plugin documentation](/plugins/stripe#checkout-failure-automatic-refund) for an example implementation.
