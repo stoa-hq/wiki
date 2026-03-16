@@ -132,6 +132,7 @@ Creates a new order. For guest checkouts, the response includes a `guest_token` 
   "payment_method_id": "uuid",
   "shipping_method_id": "uuid",
   "notes": "Ring the doorbell twice",
+  "payment_reference": "pi_3ABC...",
   "items": [
     {
       "product_id": "uuid",
@@ -150,12 +151,19 @@ Creates a new order. For guest checkouts, the response includes a `guest_token` 
 
 If active payment methods are configured in the shop, `payment_method_id` is required and must reference an active method. If no payment methods are configured (invoice-only shops), the field is optional.
 
+**Payment Reference (provider-based methods):**
+
+When the selected payment method has a `provider` (e.g. `"stripe"`), the `payment_reference` field is **required**. This is the provider's payment identifier (e.g. a Stripe PaymentIntent ID like `pi_3ABC...`) that proves payment has been completed before order creation.
+
+For manual payment methods (where `provider` is empty), `payment_reference` is optional and can be omitted.
+
 | Error Code | Status | Description |
 |------------|--------|-------------|
 | `payment_method_required` | 422 | Active payment methods exist but none was selected |
 | `invalid_payment_method` | 422 | The selected payment method is inactive or does not exist |
-| `checkout_rejected` | 422 | A plugin hook rejected the checkout |
+| `payment_reference_required` | 422 | Provider-based payment method selected but no `payment_reference` provided |
+| `checkout_rejected` | 422 | A plugin hook rejected the checkout (e.g. Stripe PaymentIntent not succeeded) |
 
 **Checkout Hooks:**
 
-Plugins can register `checkout.before` hooks to validate or reject checkouts, and `checkout.after` hooks to perform post-order actions (e.g. creating payment intents). See [Orders Guide](/guide/orders#checkout-hooks) for details.
+Plugins can register `checkout.before` hooks to validate or reject checkouts. The hook receives metadata including `provider` and `payment_reference`, allowing provider plugins to verify payment completion. After-hooks (`checkout.after`) fire after order creation for post-order actions. See [Orders Guide](/guide/orders#checkout-hooks) for details.

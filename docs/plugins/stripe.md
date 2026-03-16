@@ -4,15 +4,29 @@ The `stoa-plugin-stripe` plugin integrates [Stripe](https://stripe.com) as a pay
 
 ## How it works
 
+The Stripe plugin supports two checkout flows:
+
+### Pay-First Flow (recommended) {#pay-first}
+
+Payment is completed **before** the order is created. This prevents unpaid orders.
+
 ```
 Agent / Frontend
     │
-    │  1. store_checkout → creates Order (status: pending)
-    │  2. store_stripe_create_payment_intent → creates Stripe PaymentIntent
+    │  1. store_stripe_create_preorder_payment_intent(amount, currency, payment_method_id)
+    │     → creates Stripe PaymentIntent (pre-order mode)
     │
     ▼
 Stripe
     │  Customer confirms payment (Stripe.js / mobile SDK)
+    │
+    ▼
+Agent / Frontend
+    │
+    │  2. store_checkout(..., payment_reference: "pi_xxx")
+    │     → validates PaymentIntent status via checkout.before hook
+    │     → creates Order (status: pending)
+    │     → webhook later transitions to confirmed
     │
     ▼
 POST /plugins/stripe/webhook (payment_intent.succeeded)
@@ -23,6 +37,24 @@ stoa-plugin-stripe
     ├── Transitions Order: pending → confirmed
     └── Fires payment.after_complete hook
 ```
+
+### Legacy Flow (post-order) {#legacy-flow}
+
+Order is created first, then payment is initiated. Still supported for backward compatibility.
+
+```
+Agent / Frontend
+    │
+    │  1. store_checkout → creates Order (status: pending)
+    │  2. store_stripe_create_payment_intent(order_id, payment_method_id)
+    │
+    ▼
+Stripe → webhook → confirmed
+```
+
+::: warning Pay-First is recommended
+The legacy flow allows orders without payment. With the pay-first flow, the `payment_reference` is validated via the `checkout.before` hook — the Stripe plugin verifies the PaymentIntent status is `succeeded` before the order is created.
+:::
 
 ## Installation
 
@@ -79,14 +111,32 @@ Copy the **Signing secret** (`whsec_...`) and put it in `webhook_secret`.
 POST /api/v1/store/stripe/payment-intent
 ```
 
-Creates a Stripe PaymentIntent for a pending order. Call this after `store_checkout` to initiate payment.
+Creates a Stripe PaymentIntent. This endpoint supports two modes:
 
-This endpoint supports both authenticated and guest checkout:
+#### Pre-Order Mode (pay first)
 
-- **Authenticated users**: Bearer token required. The plugin verifies that `customer_id` matches the authenticated user.
-- **Guest checkout**: No token needed. Pass the `guest_token` returned by the checkout endpoint to prove ownership of the guest order.
+Create a PaymentIntent before placing an order. Use this with the [pay-first flow](#pay-first).
 
-Requests for orders belonging to other customers or with an invalid guest token receive `404 Not Found`.
+**Request body:**
+```json
+{
+  "amount": 4999,
+  "currency": "EUR",
+  "payment_method_id": "018e1b2c-..."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `amount` | int | Yes | Total amount in cents (e.g. `4999` = €49.99) |
+| `currency` | string | Yes | ISO 4217 currency code (e.g. `EUR`) |
+| `payment_method_id` | UUID | Yes | ID of the Stoa PaymentMethod with `provider = "stripe"` |
+
+After payment confirmation, pass the returned `id` as `payment_reference` to the checkout endpoint.
+
+#### Post-Order Mode (legacy)
+
+Create a PaymentIntent for an existing pending order.
 
 **Request body:**
 ```json
@@ -102,6 +152,8 @@ Requests for orders belonging to other customers or with an invalid guest token 
 | `order_id` | UUID | Yes | ID of the pending order (from `store_checkout`) |
 | `payment_method_id` | UUID | Yes | ID of the Stoa PaymentMethod with `provider = "stripe"` |
 | `guest_token` | UUID | Guest only | Token returned by checkout for guest orders |
+
+This mode supports both authenticated and guest checkout. Authenticated users need a Bearer token; the plugin verifies `customer_id` ownership. Guest checkout requires the `guest_token`.
 
 **Response (`201 Created`):**
 ```json
@@ -149,20 +201,30 @@ Requires authentication. Returns the plugin status and the publishable key.
 }
 ```
 
-## MCP Tool
+## MCP Tools
 
-The plugin adds a new tool to the Store MCP server:
+The plugin adds two tools to the Store MCP server:
+
+### `store_stripe_create_preorder_payment_intent`
+
+Creates a Stripe PaymentIntent before placing an order (pay-first flow). Returns the `id` to pass as `payment_reference` to `store_checkout`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `amount` | number | Yes | Total in cents (e.g. `4999` for €49.99) |
+| `currency` | string | Yes | ISO 4217 code (e.g. `EUR`) |
+| `payment_method_id` | string (UUID) | Yes | ID of the Stoa PaymentMethod (provider = stripe) |
 
 ### `store_stripe_create_payment_intent`
 
-Creates a Stripe PaymentIntent for a pending order. Returns the `client_secret` needed to confirm payment.
+Creates a Stripe PaymentIntent for an existing pending order (legacy flow). Returns the `client_secret` for Stripe.js.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `order_id` | string (UUID) | Yes | ID of the pending order |
 | `payment_method_id` | string (UUID) | Yes | ID of the Stoa PaymentMethod (provider = stripe) |
 
-**Returns:**
+**Returns (both tools):**
 ```json
 {
   "id": "pi_3ABC...",
@@ -179,23 +241,27 @@ The Stripe plugin ships a built-in Web Component (`stoa-stripe-checkout`) that r
 
 ### Checkout flow
 
-The Storefront checkout uses a two-step payment flow when Stripe is installed:
+The Storefront checkout uses a **pay-first** flow when a provider-based payment method (e.g. Stripe) is selected:
 
 ```
 1. Customer fills in address, selects shipping & payment method
 2. Customer clicks "Place Order"
-   → Order is created with status: pending
-   → For guest checkout: a guest_token is returned
-3. Stripe component appears automatically
-   → Creates a PaymentIntent via backend API (with guest_token for guests)
-   → Renders Stripe Payment Element (card, SEPA, etc.)
-4. Customer enters card details and clicks "Pay"
+   → If payment method has a provider (e.g. "stripe"):
+     → Stripe component appears BEFORE order creation
+     → Creates a pre-order PaymentIntent with total amount
+     → Renders Stripe Payment Element (card, SEPA, etc.)
+3. Customer enters card details and clicks "Pay"
    → Stripe.js confirms the payment
-5. On success → Redirect to order confirmation page
+4. On success:
+   → Checkout creates order with payment_reference = PaymentIntent ID
+   → Stripe plugin validates the reference via checkout.before hook
+   → Order is created → redirect to confirmation
    On failure → Error message, customer can retry
 ```
 
-Both registered customers and guest users can complete the checkout. Guest orders are tied to a one-time `guest_token` that is only valid for the specific order.
+For **manual payment methods** (no provider), the order is created immediately without showing the Stripe component.
+
+Both registered customers and guest users can complete the checkout.
 
 ::: tip Automatic payment methods
 The plugin uses Stripe's [Automatic Payment Methods](https://stripe.com/docs/payments/payment-methods/integration-options#using-automatic-payment-methods), which means all payment methods enabled in your Stripe Dashboard (cards, SEPA, Klarna, etc.) are automatically available — no extra configuration needed.
@@ -262,6 +328,8 @@ The Stripe component renders in the Light DOM (not Shadow DOM) because Stripe's 
 
 Full end-to-end purchase with Claude (or any MCP-compatible agent):
 
+### Pay-First Flow (recommended)
+
 ```
 1. store_login(email, password)
    → returns access token
@@ -280,15 +348,29 @@ Full end-to-end purchase with Claude (or any MCP-compatible agent):
 6. store_get_payment_methods()
    → agent finds the Stripe payment method (provider = "stripe")
 
+7. store_stripe_create_preorder_payment_intent(amount, currency, payment_method_id)
+   → returns payment_intent_id + client_secret
+
+8. User confirms payment via Stripe.js / mobile SDK using client_secret
+
+9. store_checkout(cart_id, shipping_method_id, payment_method_id, shipping_address,
+                  payment_reference: payment_intent_id)
+   → Stripe plugin validates PI is "succeeded" via checkout.before hook
+   → returns order (status: pending → confirmed via webhook)
+```
+
+### Legacy Flow
+
+```
+1-6. Same as above
+
 7. store_checkout(cart_id, shipping_method_id, payment_method_id, shipping_address)
    → returns order_id (status: pending)
 
 8. store_stripe_create_payment_intent(order_id, payment_method_id)
    → returns client_secret
 
-9. User confirms payment via Stripe.js / mobile SDK using client_secret
-
-10. Stripe sends webhook → order transitions to status: confirmed
+9. User confirms payment → webhook → confirmed
 ```
 
 ::: info Saved payment methods
@@ -322,11 +404,22 @@ Every PaymentIntent created by the Stripe plugin is enriched with human-readable
 
 ### PaymentIntent metadata
 
+**Post-order PaymentIntents:**
+
 | Key | Example | Description |
 |-----|---------|-------------|
 | `stoa_order_id` | `018e1b2c-...` | Stoa order UUID |
 | `stoa_payment_method_id` | `018e1b2c-...` | Stoa PaymentMethod UUID |
 | `stoa_order_number` | `ORD-20260315-A1B2C` | Human-readable order number |
+
+**Pre-order PaymentIntents:**
+
+| Key | Example | Description |
+|-----|---------|-------------|
+| `stoa_mode` | `pre_order` | Indicates this PI was created before the order |
+| `stoa_payment_method_id` | `018e1b2c-...` | Stoa PaymentMethod UUID |
+
+Pre-order PaymentIntents do not have `stoa_order_id` or `stoa_order_number` — the order is created after payment. The webhook handler recognizes `stoa_mode: "pre_order"` and skips order status updates.
 
 ### Description & receipt email
 

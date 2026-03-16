@@ -21,7 +21,7 @@ export default defineConfig({
       { text: 'Plugins', link: '/plugins/overview' },
       { text: 'MCP', link: '/mcp/overview' },
       {
-        text: 'v0.2.4',
+        text: 'v0.2.5',
         items: [
           { text: 'Changelog', link: '/changelog' },
           { text: 'GitHub', link: 'https://github.com/stoa-hq/stoa' }
