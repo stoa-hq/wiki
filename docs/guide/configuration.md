@@ -111,9 +111,8 @@ Never use `sslmode=disable` in production. Even within private networks, TLS pro
 stoa serve                  # Start HTTP server
 stoa migrate up             # Run migrations
 stoa migrate down           # Roll back last migration
-stoa admin create           # Create admin user
+stoa admin create           # Create admin user (interactive password prompt)
   --email admin@example.com
-  --password your-password
 stoa seed --demo            # Load demo data
 stoa plugin list            # List installed plugins
 stoa version                # Print version

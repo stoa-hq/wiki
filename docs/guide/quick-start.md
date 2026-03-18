@@ -36,7 +36,7 @@ This starts PostgreSQL and the Stoa application. On the first run the Docker ima
 docker compose exec stoa ./stoa migrate up
 
 # Create an admin user
-docker compose exec stoa ./stoa admin create --email admin@example.com --password your-password
+docker compose exec -it stoa ./stoa admin create --email admin@example.com
 
 # Optional: load demo data (products, categories, etc.)
 docker compose exec stoa ./stoa seed --demo
@@ -94,7 +94,7 @@ cp config.example.yaml config.yaml
 
 ```bash
 go run ./cmd/stoa migrate up
-go run ./cmd/stoa admin create --email admin@example.com --password your-password
+go run ./cmd/stoa admin create --email admin@example.com
 go run ./cmd/stoa seed --demo   # optional
 ```
 

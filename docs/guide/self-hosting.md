@@ -27,7 +27,7 @@ Edit `config.yaml` for production — see [Production Settings](#production-sett
 ```bash
 docker compose up -d
 docker compose exec stoa ./stoa migrate up
-docker compose exec stoa ./stoa admin create --email admin@example.com --password your-secure-password
+docker compose exec -it stoa ./stoa admin create --email admin@example.com
 ```
 
 ### Binary
@@ -42,7 +42,7 @@ cp config.example.yaml config.yaml
 
 # Start
 ./stoa migrate up
-./stoa admin create --email admin@example.com --password your-secure-password
+./stoa admin create --email admin@example.com
 ./stoa serve
 ```
 
