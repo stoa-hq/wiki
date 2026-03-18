@@ -27,6 +27,10 @@ STOA_SERVER_PORT=8080
 | `server.max_body_size` | `1048576` (1 MB) | Max request body size for JSON endpoints (bytes) |
 | `server.max_upload_size` | `36700160` (35 MB) | Max request body size for multipart/file uploads (bytes) |
 | `payment.encryption_key` | *(required)* | AES-256 key for payment config encryption (32 bytes or 64 hex chars) |
+| `security.rate_limit.requests_per_minute` | `300` | Global IP-based rate limit |
+| `security.rate_limit.login.requests_per_minute` | `10` | Login endpoint rate limit per IP |
+| `security.rate_limit.register.requests_per_minute` | `5` | Register endpoint rate limit per IP |
+| `security.rate_limit.checkout.requests_per_minute` | `10` | Checkout endpoint rate limit per IP |
 
 ## Request Body Limits
 

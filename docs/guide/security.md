@@ -128,6 +128,68 @@ Access tokens have a maximum lifetime of 15 minutes. An in-memory data structure
 In a multi-instance deployment, each instance maintains its own blacklist. A token blacklisted on one instance won't be rejected by another. For single-instance deployments (the typical Stoa setup), this is not an issue. For multi-instance setups, consider placing a shared cache (e.g. Redis) behind a custom middleware.
 :::
 
+## Rate Limiting
+
+Stoa applies rate limiting at two levels:
+
+### Global rate limit
+
+A global IP-based rate limit applies to all API requests. The default is **300 requests per minute** per IP with a burst allowance of 50.
+
+### Endpoint-specific rate limits
+
+Sensitive endpoints have **dedicated, stricter rate limits** on top of the global limit. These protect against credential stuffing, account enumeration, and checkout abuse:
+
+| Endpoint | Default Limit | Description |
+|----------|--------------|-------------|
+| `POST /api/v1/auth/login` | 10 req/min per IP | Prevents brute-force login attempts |
+| `POST /api/v1/store/register` | 5 req/min per IP | Prevents mass account creation |
+| `POST /api/v1/store/checkout` | 10 req/min per IP | Prevents checkout abuse |
+
+When the limit is exceeded, the server responds with `429 Too Many Requests` and includes a `Retry-After` header indicating how many seconds to wait before retrying.
+
+```json
+HTTP/1.1 429 Too Many Requests
+Retry-After: 42
+
+{
+  "error": "Too Many Requests"
+}
+```
+
+### Configuration
+
+All rate limits are configurable in `config.yaml`:
+
+```yaml
+security:
+  rate_limit:
+    requests_per_minute: 300  # Global limit
+    burst: 50
+    login:
+      requests_per_minute: 10
+    register:
+      requests_per_minute: 5
+    checkout:
+      requests_per_minute: 10
+```
+
+Or via environment variables:
+
+```bash
+STOA_SECURITY_RATE_LIMIT_LOGIN_REQUESTS_PER_MINUTE=10
+STOA_SECURITY_RATE_LIMIT_REGISTER_REQUESTS_PER_MINUTE=5
+STOA_SECURITY_RATE_LIMIT_CHECKOUT_REQUESTS_PER_MINUTE=10
+```
+
+::: tip
+Endpoint-specific limits are independent — exhausting the login limit does not affect `/refresh` or `/logout`. Each IP address has its own counter.
+:::
+
+::: info Brute-force protection
+In addition to IP-based rate limiting, Stoa has **email-based brute-force protection** on the login endpoint: after 5 failed attempts for the same email, the account is locked for 60 minutes. This works in tandem with rate limiting — rate limits protect against credential stuffing across different emails, while brute-force protection guards individual accounts.
+:::
+
 ## Authentication
 
 See [Authentication](/api/authentication) for details on JWT access/refresh tokens, RBAC roles, and CSRF protection.
