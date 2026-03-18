@@ -9,7 +9,7 @@ cp config.example.yaml config.yaml
 Settings can also be overridden via environment variables with the `STOA_` prefix:
 
 ```bash
-STOA_DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=disable"
+STOA_DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=require"
 STOA_AUTH_JWT_SECRET="a-secure-secret"
 STOA_SERVER_PORT=8080
 ```
@@ -71,6 +71,34 @@ STOA_PAYMENT_ENCRYPTION_KEY="your-64-char-hex-key"
 
 ::: warning
 Never commit your `config.yaml` to version control if it contains real secrets. Use environment variables in production.
+:::
+
+## Database SSL/TLS
+
+The `database.url` connection string supports a `sslmode` parameter that controls whether the connection to PostgreSQL is encrypted:
+
+| Mode | Description |
+|------|-------------|
+| `disable` | No TLS — credentials and data sent in plaintext |
+| `require` | TLS required — connection fails if the server doesn't support it |
+| `verify-ca` | TLS + server certificate verified against a CA |
+| `verify-full` | TLS + server certificate verified + hostname match |
+
+The default in `config.example.yaml` is `sslmode=require`. Use `sslmode=disable` only for local development (e.g. Docker Compose with a local PostgreSQL container).
+
+```yaml
+database:
+  url: "postgres://stoa:secret@localhost:5432/stoa?sslmode=require"
+```
+
+Stoa logs a warning at startup when `sslmode=disable` is detected:
+
+```
+WRN database connection uses sslmode=disable — not recommended for production
+```
+
+::: warning
+Never use `sslmode=disable` in production. Even within private networks, TLS protects against credential sniffing and man-in-the-middle attacks.
 :::
 
 ## CLI Reference

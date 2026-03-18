@@ -104,6 +104,10 @@ your-domain.com {
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    }
 }
 ```
 
@@ -147,6 +151,9 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
+    # HSTS — enforce HTTPS for all future requests
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
     # Match Stoa's max_upload_size (default 35 MiB)
     client_max_body_size 35m;
 
@@ -179,6 +186,26 @@ sudo systemctl reload nginx
 Set `client_max_body_size` to match Stoa's `server.max_upload_size` config (default: 35 MiB). If you increase the upload limit in Stoa, update nginx accordingly.
 :::
 
+## HSTS (HTTP Strict Transport Security)
+
+HSTS tells browsers to always use HTTPS for your domain — preventing protocol downgrade attacks. Because Stoa listens on plain HTTP and relies on the reverse proxy for TLS termination, **HSTS must be configured on the proxy, not in Stoa**.
+
+Both the Caddy and nginx configurations above already include the recommended HSTS header:
+
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+```
+
+| Directive | Meaning |
+|-----------|---------|
+| `max-age=31536000` | Browser remembers HTTPS-only for 1 year |
+| `includeSubDomains` | Applies to all subdomains |
+| `preload` | Eligible for [HSTS Preload List](https://hstspreload.org) — optional, submit only after confirming HTTPS works |
+
+::: warning
+Only add the `preload` directive if you are certain your domain (and all subdomains) will support HTTPS permanently. Once submitted to the preload list, removal is slow and difficult.
+:::
+
 ## Production Settings
 
 | Setting | Value | Purpose |
@@ -189,6 +216,7 @@ Set `client_max_body_size` to match Stoa's `server.max_upload_size` config (defa
 | `security.rate_limit.requests_per_minute` | `300` (default) | Per-IP rate limiting — requires correct proxy headers |
 | `security.rate_limit.burst` | `50` (default) | Burst allowance for rate limiter |
 | `auth.jwt_secret` | Random 64-char hex | JWT signing secret — **must** be unique per deployment |
+| `database.url` (sslmode) | `require` | Database connection SSL mode — use `require` or stricter |
 | `payment.encryption_key` | Random 32-char hex | AES encryption key for payment data |
 
 See [Configuration](/guide/configuration) for the full reference.
@@ -209,5 +237,7 @@ Before going live, verify each item:
 - [ ] **CORS origins** restricted to your domain(s)
 - [ ] **Firewall** configured — only ports 80 and 443 open to the internet
 - [ ] **Database** not exposed to the internet (bind to localhost or private network)
+- [ ] **Database SSL/TLS** enabled (`sslmode=require` or stricter in `database.url`) — see [Database SSL/TLS](/guide/configuration#database-ssl-tls)
 - [ ] **Backups** configured for PostgreSQL (pg_dump or continuous archiving)
 - [ ] **Proxy headers** forwarding real client IP (`X-Real-IP`, `X-Forwarded-For`)
+- [ ] **HSTS header** configured on reverse proxy (`Strict-Transport-Security`)

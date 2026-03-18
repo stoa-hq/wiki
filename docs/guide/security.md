@@ -96,6 +96,18 @@ Rejected uploads return:
 }
 ```
 
+## Database Connection Security
+
+Stoa defaults to `sslmode=require` for PostgreSQL connections, ensuring credentials and query data are encrypted in transit. At startup, Stoa checks the connection's TLS configuration and logs a warning if SSL is disabled:
+
+```
+WRN database connection uses sslmode=disable — not recommended for production
+```
+
+For local development with Docker Compose, `sslmode=disable` is set via the `STOA_DATABASE_URL` environment variable — this is safe because traffic stays within Docker's internal bridge network.
+
+See [Database SSL/TLS](/guide/configuration#database-ssl-tls) for all available SSL modes.
+
 ## Authentication
 
 See [Authentication](/api/authentication) for details on JWT access/refresh tokens, RBAC roles, and CSRF protection.
