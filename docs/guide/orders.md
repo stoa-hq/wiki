@@ -61,21 +61,32 @@ Each `OrderItem` is a snapshot of what was purchased at the time of the order. P
 
 `customer_id` is nullable. Orders from non-registered customers have no customer link — billing and shipping addresses are stored directly on the order.
 
-### Guest Session ID
+### Guest Token
 
-Every guest order receives a unique `guest_token` (UUID) at checkout. This token serves two purposes:
+Every guest order receives a cryptographically strong `guest_token` (32 random bytes, hex-encoded to 64 characters) at checkout. This token serves two purposes:
 
 1. **Ownership verification** — the storefront uses it to let guests view their order and complete payment without an account.
 2. **Payment reconciliation** — admins can use the token to match orders to payment provider sessions (e.g. Stripe Payment Intents).
 
-The guest token is displayed in the Admin Panel on the order detail page, inside the **Payment Transactions** card. Admins can copy it with one click and search for it in the payment provider's dashboard.
+The guest token is **not included in the checkout API response body**. Instead, it is delivered as an **HTTP-only cookie** (`stoa_guest_token`) with `SameSite=Lax` and `Secure` (when HTTPS is enabled). The browser sends this cookie automatically on subsequent API requests, making the token invisible to JavaScript and resistant to XSS attacks.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `guest_token` | string? | UUID assigned at checkout, only present for guest orders |
+The store API response includes an `is_guest_order` boolean flag instead of the raw token:
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "order_number": "ORD-20260315-A1B2C",
+    "is_guest_order": true,
+    "status": "pending"
+  }
+}
+```
+
+The guest token is still displayed in the **Admin Panel** on the order detail page and returned in the Admin API response (`guest_token` field). Admins can copy it with one click and search for it in the payment provider's dashboard.
 
 ::: tip
-When refunding a guest order via Stripe, use the guest session ID to locate the corresponding Payment Intent in the Stripe Dashboard.
+When refunding a guest order via Stripe, use the guest token from the Admin Panel to locate the corresponding Payment Intent in the Stripe Dashboard.
 :::
 
 ## Payment Transactions

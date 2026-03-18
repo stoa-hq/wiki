@@ -145,6 +145,7 @@ Sensitive endpoints have **dedicated, stricter rate limits** on top of the globa
 | `POST /api/v1/auth/login` | 10 req/min per IP | Prevents brute-force login attempts |
 | `POST /api/v1/store/register` | 5 req/min per IP | Prevents mass account creation |
 | `POST /api/v1/store/checkout` | 10 req/min per IP | Prevents checkout abuse |
+| `GET /api/v1/store/orders/:id/transactions` | 10 req/min per IP | Prevents guest token guessing |
 
 When the limit is exceeded, the server responds with `429 Too Many Requests` and includes a `Retry-After` header indicating how many seconds to wait before retrying.
 
@@ -172,6 +173,8 @@ security:
       requests_per_minute: 5
     checkout:
       requests_per_minute: 10
+    guest_order:
+      requests_per_minute: 10
 ```
 
 Or via environment variables:
@@ -180,6 +183,7 @@ Or via environment variables:
 STOA_SECURITY_RATE_LIMIT_LOGIN_REQUESTS_PER_MINUTE=10
 STOA_SECURITY_RATE_LIMIT_REGISTER_REQUESTS_PER_MINUTE=5
 STOA_SECURITY_RATE_LIMIT_CHECKOUT_REQUESTS_PER_MINUTE=10
+STOA_SECURITY_RATE_LIMIT_GUEST_ORDER_REQUESTS_PER_MINUTE=10
 ```
 
 ::: tip
@@ -189,6 +193,33 @@ Endpoint-specific limits are independent — exhausting the login limit does not
 ::: info Brute-force protection
 In addition to IP-based rate limiting, Stoa has **email-based brute-force protection** on the login endpoint: after 5 failed attempts for the same email, the account is locked for 60 minutes. This works in tandem with rate limiting — rate limits protect against credential stuffing across different emails, while brute-force protection guards individual accounts.
 :::
+
+## Guest Token Security
+
+Guest orders use a cryptographically strong token for ownership verification. The token is never exposed in the API response body — it is delivered exclusively via an **HTTP-only cookie**.
+
+### Token generation
+
+Each guest checkout generates a **32-byte random token** using `crypto/rand`, hex-encoded to 64 characters. This provides 256 bits of entropy, making brute-force guessing infeasible.
+
+### Cookie delivery
+
+The guest token is set as the `stoa_guest_token` cookie on the checkout response:
+
+| Attribute | Value | Reason |
+|-----------|-------|--------|
+| `HttpOnly` | `true` | Prevents JavaScript access (XSS protection) |
+| `SameSite` | `Lax` | Allows payment provider redirects (e.g. Stripe 3D Secure) |
+| `Secure` | Matches CSRF config | Set when serving over HTTPS |
+| `Path` | `/api/v1/store` | Scoped to store API routes |
+| `MaxAge` | 30 days | Covers typical order lifecycle |
+
+The browser automatically includes this cookie on subsequent store API requests (e.g. fetching payment transactions), so guest ownership verification works transparently without exposing the token to client-side JavaScript.
+
+### Store vs. Admin API
+
+- **Store API** — The checkout response includes `"is_guest_order": true` instead of the raw token. The guest token cookie handles authentication.
+- **Admin API** — Returns the full `guest_token` field for debugging and payment reconciliation.
 
 ## Authentication
 

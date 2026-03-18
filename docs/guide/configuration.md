@@ -31,6 +31,7 @@ STOA_SERVER_PORT=8080
 | `security.rate_limit.login.requests_per_minute` | `10` | Login endpoint rate limit per IP |
 | `security.rate_limit.register.requests_per_minute` | `5` | Register endpoint rate limit per IP |
 | `security.rate_limit.checkout.requests_per_minute` | `10` | Checkout endpoint rate limit per IP |
+| `security.rate_limit.guest_order.requests_per_minute` | `10` | Guest order lookup rate limit per IP |
 
 ## Request Body Limits
 

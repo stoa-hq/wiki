@@ -133,15 +133,16 @@ Returns a single order with ownership verification.
 **Authentication:**
 
 - **Authenticated customers** — the order's `customer_id` must match the JWT user ID.
-- **Guest orders** — pass the `guest_token` as a query parameter.
+- **Guest orders** — the `stoa_guest_token` HTTP-only cookie (set during checkout) is sent automatically by the browser.
 
 ```bash
 # Authenticated customer
 curl http://localhost:8080/api/v1/store/account/orders/<id> \
   -H 'Authorization: Bearer <token>'
 
-# Guest order
-curl http://localhost:8080/api/v1/store/account/orders/<id>?guest_token=<token>
+# Guest order (cookie is sent automatically by the browser)
+curl http://localhost:8080/api/v1/store/account/orders/<id> \
+  --cookie "stoa_guest_token=<token>"
 ```
 
 | Status | Condition |
@@ -151,7 +152,7 @@ curl http://localhost:8080/api/v1/store/account/orders/<id>?guest_token=<token>
 | `404` | Order not found |
 
 ::: warning Security
-The `guest_token` is never included in the response body. It is only used as an authentication mechanism for guest order lookups.
+The guest token is delivered as an HTTP-only cookie and never included in the API response body. This prevents XSS attacks from stealing the token. See [Guest Token Security](/guide/security#guest-token-security) for details.
 :::
 
 ### List Payment Transactions (Store)
@@ -165,15 +166,16 @@ Returns payment transactions for a given order after verifying ownership. Uses t
 **Authentication:**
 
 - **Authenticated customers** — the order's `customer_id` must match the JWT user ID.
-- **Guest orders** — pass the `guest_token` as a query parameter.
+- **Guest orders** — the `stoa_guest_token` HTTP-only cookie (set during checkout) is sent automatically by the browser.
 
 ```bash
 # Authenticated customer
 curl http://localhost:8080/api/v1/store/orders/<orderID>/transactions \
   -H 'Authorization: Bearer <token>'
 
-# Guest order
-curl http://localhost:8080/api/v1/store/orders/<orderID>/transactions?guest_token=<token>
+# Guest order (cookie is sent automatically by the browser)
+curl http://localhost:8080/api/v1/store/orders/<orderID>/transactions \
+  --cookie "stoa_guest_token=<token>"
 ```
 
 **Response:**
@@ -208,7 +210,7 @@ curl http://localhost:8080/api/v1/store/orders/<orderID>/transactions?guest_toke
 POST /api/v1/store/checkout
 ```
 
-Creates a new order. For guest checkouts, the response includes a `guest_token` that the storefront uses for payment completion and order lookup.
+Creates a new order. For guest checkouts, the server sets an HTTP-only `stoa_guest_token` cookie that the browser uses automatically for payment completion and order lookup. The response includes `"is_guest_order": true` instead of the raw token.
 
 **Request Body:**
 
