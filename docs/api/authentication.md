@@ -85,7 +85,7 @@ This limits the damage window of a stolen refresh token to a single use.
 
 ### Logout
 
-Revoke all active refresh tokens for the current session:
+Revoke all active tokens for the current session:
 
 ```bash
 # With refresh token in body (preferred)
@@ -96,9 +96,21 @@ curl -X POST http://localhost:8080/api/v1/auth/logout \
 # Or with Authorization header (when logged in)
 curl -X POST http://localhost:8080/api/v1/auth/logout \
   -H 'Authorization: Bearer <access_token>'
+
+# Both (recommended — revokes access + refresh tokens)
+curl -X POST http://localhost:8080/api/v1/auth/logout \
+  -H 'Authorization: Bearer <access_token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"refresh_token": "<your_refresh_token>"}'
 ```
 
-Logout revokes all refresh tokens for the user. The access token remains valid until it expires (max 15 minutes).
+Logout performs two actions:
+
+1. **Blacklists the access token** — the token's JTI is added to an in-memory blacklist, making it immediately unusable. Both `Authenticate` and `OptionalAuth` middleware reject blacklisted tokens.
+2. **Revokes all refresh tokens** for the user, preventing new access tokens from being issued.
+
+::: tip Immediate invalidation
+Unlike many JWT implementations where access tokens remain valid until they expire, Stoa blacklists the access token on logout so it is rejected immediately. The blacklist is automatically cleaned up as tokens expire (max 15 minutes).
 
 ### JWT Claims
 
@@ -231,6 +243,7 @@ Authentication errors follow the standard Stoa error format:
     {"code": "invalid_credentials", "detail": "invalid email or password"},
     {"code": "invalid_token", "detail": "invalid refresh token"},
     {"code": "unauthorized", "detail": "missing authorization header"},
+    {"code": "unauthorized", "detail": "token has been revoked"},
     {"code": "account_locked", "detail": "too many failed login attempts, please try again later"}
   ]
 }

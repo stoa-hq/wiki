@@ -169,7 +169,13 @@ The Store MCP binary discovers `MCPStorePlugin` implementations automatically at
 
 ## Error handling
 
-If `Init` returns an error, the plugin is not registered and the error is propagated — Stoa will not start.
+If `Init` returns an error, the plugin is not registered and the error is logged — Stoa skips the plugin and continues starting.
+
+If a plugin panics during registration (in `Name()`, `Init()`, or any other interface method), Stoa recovers the panic, converts it to an error, and skips the plugin. The server continues to start normally and other plugins are not affected.
+
+::: warning Panics are caught — but fix them
+Panic recovery is a safety net, not an expected code path. A plugin that panics during registration will not be available at runtime. Check the server logs for `plugin panicked during registration` messages.
+:::
 
 If an **after-hook** handler returns an error, it is logged but does not abort the operation. Use **before-hooks** if you need to cancel an operation.
 

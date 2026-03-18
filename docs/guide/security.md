@@ -108,6 +108,26 @@ For local development with Docker Compose, `sslmode=disable` is set via the `STO
 
 See [Database SSL/TLS](/guide/configuration#database-ssl-tls) for all available SSL modes.
 
+## Token Blacklisting
+
+Stoa maintains an **in-memory blacklist** for revoked JWT access tokens. When a user logs out, the access token's JTI (unique token ID) is added to the blacklist, making it immediately unusable — even before the token's natural expiry.
+
+### How it works
+
+1. On logout, the access token from the `Authorization` header is parsed and its JTI + expiry time are stored in the blacklist
+2. Both `Authenticate` and `OptionalAuth` middleware check the blacklist before accepting a Bearer token
+3. Blacklisted tokens in `Authenticate` return `401 Unauthorized` with `"token has been revoked"`
+4. Blacklisted tokens in `OptionalAuth` are treated as anonymous (the request continues without auth context)
+5. A background goroutine cleans up expired entries every minute — since access tokens live at most 15 minutes, memory usage stays minimal
+
+### Why in-memory?
+
+Access tokens have a maximum lifetime of 15 minutes. An in-memory data structure with TTL-based cleanup is sufficient — there's no need for Redis or database storage. The blacklist is protected by a read-write mutex for concurrent access.
+
+::: info Scaling note
+In a multi-instance deployment, each instance maintains its own blacklist. A token blacklisted on one instance won't be rejected by another. For single-instance deployments (the typical Stoa setup), this is not an issue. For multi-instance setups, consider placing a shared cache (e.g. Redis) behind a custom middleware.
+:::
+
 ## Authentication
 
 See [Authentication](/api/authentication) for details on JWT access/refresh tokens, RBAC roles, and CSRF protection.
