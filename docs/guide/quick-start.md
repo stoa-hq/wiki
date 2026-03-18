@@ -9,7 +9,7 @@ Everything you need is Docker. No Go or Node.js required.
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/stoa-hq/stoa.git
 cd stoa
 ```
 
