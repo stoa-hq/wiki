@@ -114,6 +114,94 @@ Transactions are created by payment plugins (e.g. Stripe) via webhooks — they 
 
 ## Store API
 
+### List Customer Orders
+
+```http
+GET /api/v1/store/account/orders
+```
+
+Returns all orders for the authenticated customer. Requires JWT authentication.
+
+### Get Order
+
+```http
+GET /api/v1/store/account/orders/:id
+```
+
+Returns a single order with ownership verification.
+
+**Authentication:**
+
+- **Authenticated customers** — the order's `customer_id` must match the JWT user ID.
+- **Guest orders** — pass the `guest_token` as a query parameter.
+
+```bash
+# Authenticated customer
+curl http://localhost:8080/api/v1/store/account/orders/<id> \
+  -H 'Authorization: Bearer <token>'
+
+# Guest order
+curl http://localhost:8080/api/v1/store/account/orders/<id>?guest_token=<token>
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Ownership verified — order returned |
+| `403` | Caller does not own this order |
+| `404` | Order not found |
+
+::: warning Security
+The `guest_token` is never included in the response body. It is only used as an authentication mechanism for guest order lookups.
+:::
+
+### List Payment Transactions (Store)
+
+```http
+GET /api/v1/store/orders/:orderID/transactions
+```
+
+Returns payment transactions for a given order after verifying ownership. Uses the same ownership model as [Get Order](#get-order-1).
+
+**Authentication:**
+
+- **Authenticated customers** — the order's `customer_id` must match the JWT user ID.
+- **Guest orders** — pass the `guest_token` as a query parameter.
+
+```bash
+# Authenticated customer
+curl http://localhost:8080/api/v1/store/orders/<orderID>/transactions \
+  -H 'Authorization: Bearer <token>'
+
+# Guest order
+curl http://localhost:8080/api/v1/store/orders/<orderID>/transactions?guest_token=<token>
+```
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "order_id": "uuid",
+      "payment_method_id": "uuid",
+      "status": "completed",
+      "currency": "EUR",
+      "amount": 2498,
+      "provider_reference": "pi_abc123",
+      "created_at": "2026-03-15T10:05:00Z"
+    }
+  ],
+  "meta": { "total": 1, "page": 1, "limit": 1, "pages": 1 }
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Ownership verified — transactions returned |
+| `403` | Caller does not own this order |
+| `404` | Order not found |
+
 ### Checkout
 
 ```http
@@ -136,16 +224,26 @@ Creates a new order. For guest checkouts, the response includes a `guest_token` 
   "items": [
     {
       "product_id": "uuid",
-      "sku": "SHIRT-RED-M",
-      "name": "Red T-Shirt (M)",
-      "quantity": 2,
-      "unit_price_net": 1680,
-      "unit_price_gross": 1999,
-      "tax_rate": 1900
+      "variant_id": "uuid",
+      "quantity": 2
     }
   ]
 }
 ```
+
+**Checkout Items:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `product_id` | UUID | Yes | Product to purchase |
+| `variant_id` | UUID | No | Specific variant (size, color, etc.) |
+| `quantity` | int | Yes | Number of units (min: 1) |
+
+::: warning Server-Side Price Enforcement
+All prices, product names, and SKUs are resolved **server-side** from the database. Any client-supplied price fields (`unit_price_net`, `unit_price_gross`, `tax_rate`, `name`, `sku`) are **ignored**. This prevents price manipulation attacks.
+
+If a variant is specified, variant-specific prices and SKU are used. Otherwise, the base product prices apply.
+:::
 
 **Payment Validation:**
 
@@ -159,6 +257,8 @@ For manual payment methods (where `provider` is empty), `payment_reference` is o
 
 | Error Code | Status | Description |
 |------------|--------|-------------|
+| `missing_product_id` | 422 | A line item is missing the required `product_id` |
+| `invalid_product` | 422 | The referenced product or variant does not exist |
 | `payment_method_required` | 422 | Active payment methods exist but none was selected |
 | `invalid_payment_method` | 422 | The selected payment method is inactive or does not exist |
 | `payment_reference_required` | 422 | Provider-based payment method selected but no `payment_reference` provided |
