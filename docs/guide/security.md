@@ -221,6 +221,48 @@ The browser automatically includes this cookie on subsequent store API requests 
 - **Store API** — The checkout response includes `"is_guest_order": true` instead of the raw token. The guest token cookie handles authentication.
 - **Admin API** — Returns the full `guest_token` field for debugging and payment reconciliation.
 
+## JWT Secret Validation
+
+Stoa validates the JWT signing secret at startup and refuses to start if the secret is insecure.
+
+### Requirements
+
+| Check | Behavior |
+|-------|----------|
+| Default value `change-me-in-production` | **Startup aborted** with error |
+| Length < 32 bytes | **Startup aborted** with error |
+| Length 32–63 bytes | Startup proceeds with a **warning** |
+| Length >= 64 bytes | No warning |
+
+### Generating a secure secret
+
+```bash
+# Generate a 64-byte random secret (recommended)
+openssl rand -base64 64
+```
+
+Set via environment variable or `config.yaml`:
+
+```bash
+STOA_AUTH_JWT_SECRET="your-secure-secret-here"
+```
+
+If the secret fails validation, you'll see an error like:
+
+```
+jwt: default secret 'change-me-in-production' must not be used — set auth.jwt_secret in config
+```
+
+or:
+
+```
+jwt: secret must be at least 32 bytes, got 12
+```
+
+::: warning
+The default value `change-me-in-production` is publicly known and must never be used outside of local development. Stoa will refuse to start with this value.
+:::
+
 ## Authentication
 
 See [Authentication](/api/authentication) for details on JWT access/refresh tokens, RBAC roles, and CSRF protection.

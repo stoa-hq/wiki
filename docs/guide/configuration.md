@@ -20,7 +20,7 @@ STOA_SERVER_PORT=8080
 |---------|---------|-------------|
 | `server.port` | `8080` | HTTP port |
 | `database.url` | `postgres://stoa:secret@localhost:5432/stoa` | PostgreSQL connection string |
-| `auth.jwt_secret` | `change-me-in-production` | JWT signing key |
+| `auth.jwt_secret` | *(required, min 32 bytes)* | JWT signing key — see [JWT Secret Validation](/guide/security#jwt-secret-validation) |
 | `media.storage` | `local` | Media storage (`local` or `s3`) |
 | `media.local_path` | `./uploads` | Local upload path |
 | `i18n.default_locale` | `de-DE` | Default language |
@@ -61,7 +61,9 @@ server:
 
 ## Payment Encryption Key
 
-The `payment.encryption_key` is required to encrypt provider credentials (API keys, secrets) stored in payment methods. Set it before the first run:
+The `payment.encryption_key` is required to encrypt provider credentials (API keys, secrets) stored in payment methods. Stoa validates this key at startup **before** connecting to the database — if the key is missing or has an invalid length, the server exits immediately with a descriptive error message.
+
+The key must be exactly **32 bytes** (raw) or **64 hex characters**:
 
 ```bash
 # Generate a random 64-character hex key
@@ -72,6 +74,13 @@ Set via environment variable:
 
 ```bash
 STOA_PAYMENT_ENCRYPTION_KEY="your-64-char-hex-key"
+```
+
+If the key is missing or invalid, you'll see an error like:
+
+```
+invalid configuration: payment.encryption_key is required — it protects
+stored payment credentials. Generate one with: openssl rand -hex 32
 ```
 
 ::: warning
