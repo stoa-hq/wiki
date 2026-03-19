@@ -49,6 +49,7 @@ export default defineConfig({
             { text: 'Customers', link: '/guide/customers' },
             { text: 'Warehouses & Stock', link: '/guide/warehouses' },
             { text: 'Media', link: '/guide/media' },
+            { text: 'Search', link: '/guide/search' },
           ]
         },
         {
@@ -96,6 +97,7 @@ export default defineConfig({
             { text: 'Shipping Providers', link: '/plugins/shipping' },
             { text: 'n8n Workflows', link: '/plugins/n8n' },
             { text: 'Stripe Payments', link: '/plugins/stripe' },
+            { text: 'Meilisearch Search', link: '/plugins/meilisearch' },
           ]
         }
       ],
