@@ -128,7 +128,7 @@ Stoa JWTs contain the following claims:
 
 ### Brute Force Protection
 
-The login endpoint implements rate limiting. After too many failed attempts, the account is temporarily locked. The response includes a `Retry-After` header indicating when the next attempt is allowed.
+The login endpoint implements rate limiting. After too many failed attempts, the account is temporarily locked. The response includes a fixed `Retry-After: 3600` header (1 hour). The value is intentionally constant — it does not reveal the actual remaining lockout duration, preventing attackers from optimizing brute-force timing.
 
 ```json
 {

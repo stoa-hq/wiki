@@ -192,6 +192,8 @@ Endpoint-specific limits are independent — exhausting the login limit does not
 
 ::: info Brute-force protection
 In addition to IP-based rate limiting, Stoa has **email-based brute-force protection** on the login endpoint: after 5 failed attempts for the same email, the account is locked for 60 minutes. This works in tandem with rate limiting — rate limits protect against credential stuffing across different emails, while brute-force protection guards individual accounts.
+
+The account-lock response always returns a **fixed** `Retry-After: 3600` header regardless of the actual remaining lockout time. This prevents attackers from using the header value to determine exactly when a locked account becomes available again.
 :::
 
 ## Guest Token Security
@@ -274,3 +276,9 @@ Stoa uses the **Double Submit Cookie** pattern. State-changing requests (`POST`,
 ## Password Hashing
 
 All passwords are hashed with **Argon2id**, the recommended algorithm for password storage per OWASP guidelines.
+
+### Timing-safe login
+
+Login requests always perform a full Argon2id hash comparison, regardless of whether the user exists. When a login attempt targets a non-existent email address, Stoa verifies the submitted password against a pre-computed **dummy hash** instead of returning immediately. This ensures both code paths — user found with wrong password and user not found — take the same amount of time, preventing **timing-based user enumeration**.
+
+Without this mitigation, an attacker could measure response times to determine which email addresses are registered: a fast response would indicate "user not found" (no hash computation), while a slow response would indicate "user exists" (Argon2id ran). The dummy hash uses the same `DefaultParams` (64 MB memory, 3 iterations) as real password hashes, making the timing indistinguishable.
