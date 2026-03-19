@@ -48,6 +48,7 @@ export default defineConfig({
             { text: 'Orders', link: '/guide/orders' },
             { text: 'Customers', link: '/guide/customers' },
             { text: 'Warehouses & Stock', link: '/guide/warehouses' },
+            { text: 'Media', link: '/guide/media' },
           ]
         },
         {

@@ -2,6 +2,23 @@
 
 Stoa ships with security defaults that protect both the Admin Panel and the Storefront against common web vulnerabilities.
 
+## HTTP Security Headers
+
+Stoa sets the following HTTP security headers on every response via a global middleware in `internal/server/server.go`:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing — the browser must use the declared `Content-Type` |
+| `X-Frame-Options` | `DENY` | Blocks the page from being embedded in a `<frame>`, `<iframe>`, or `<object>` (clickjacking protection) |
+| `X-XSS-Protection` | `1; mode=block` | Activates the legacy XSS auditor in older browsers and blocks the page on detection |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Sends the full URL for same-origin requests; only the origin for cross-origin HTTPS requests; nothing for cross-origin HTTP |
+| `Content-Security-Policy` | `default-src 'self'` | Baseline CSP for API routes — see [Content Security Policy](#content-security-policy-csp) for the full nonce-based policy applied to HTML pages |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Disables access to the device camera, microphone, and geolocation APIs for all browsing contexts, including embedded iframes |
+
+::: tip Permissions-Policy
+Setting `camera=()`, `microphone=()`, and `geolocation=()` with empty allowlists means the features are disabled entirely — no origin, including the page's own origin, is granted access. This prevents malicious third-party scripts or iframes from requesting sensitive device permissions on behalf of the store.
+:::
+
 ## Content Security Policy (CSP)
 
 Stoa enforces a **nonce-based Content Security Policy** on every HTML page response. This prevents cross-site scripting (XSS) by ensuring only explicitly trusted scripts can execute.
@@ -95,6 +112,60 @@ Rejected uploads return:
   ]
 }
 ```
+
+## Media Delete Path Validation
+
+When a media file is deleted via `DELETE /api/v1/admin/media/:id`, Stoa resolves the stored relative path to an absolute filesystem path. To prevent directory traversal attacks, `LocalStorage.Delete()` applies a two-stage validation before calling `os.Remove`.
+
+### Stage 1 — Regex format check
+
+The path must match the exact format produced by `Store()`:
+
+```
+YYYY/MM/xxxxxxxx-filename
+```
+
+| Segment | Rule |
+|---------|------|
+| `YYYY` | Four decimal digits (year) |
+| `MM` | Two decimal digits (month) |
+| `xxxxxxxx` | Exactly 8 lowercase hex characters (first 8 chars of a UUID v4) |
+| `filename` | One or more characters (the original filename) |
+
+The regex enforced is `^\d{4}/\d{2}/[0-9a-f]{8}-.+$`. Any path that does not match — including empty strings, bare filenames, and paths with uppercase characters in the prefix — is rejected before any filesystem access.
+
+### Stage 2 — Path containment check
+
+Even after the regex passes, Stoa resolves the path to its absolute form and verifies it remains inside the configured `basePath`:
+
+```go
+absBase, _ := filepath.Abs(basePath)
+absPath, _ := filepath.Abs(filepath.Join(basePath, filepath.Clean(relPath)))
+
+if !strings.HasPrefix(absPath, absBase+string(filepath.Separator)) {
+    return "", fmt.Errorf("path escapes base directory: %q", relPath)
+}
+```
+
+This is a defense-in-depth measure. Even a path that somehow passes the regex but contains encoded or OS-specific traversal sequences (e.g. backslash sequences on Windows) cannot escape the upload directory.
+
+### Why S3 is not affected
+
+`S3Storage` uses object keys, not filesystem paths. S3 keys are opaque strings — there is no concept of directory traversal on the S3 API. Path validation applies only to `LocalStorage`.
+
+### Error responses
+
+| Condition | Error message |
+|-----------|--------------|
+| Path does not match `YYYY/MM/xxxxxxxx-filename` | `invalid media path format: "<path>"` |
+| Resolved path escapes `basePath` | `path escapes base directory: "<path>"` |
+| File does not exist | Silent success (idempotent delete) |
+
+Both error conditions cause `Delete()` to return an error, which the media handler translates to `400 Bad Request`.
+
+::: tip Related
+See [Media](/guide/media) for a full reference of the media storage system, including storage backends, the `Store()` path format, and image processing.
+:::
 
 ## Database Connection Security
 
@@ -263,6 +334,42 @@ jwt: secret must be at least 32 bytes, got 12
 
 ::: warning
 The default value `change-me-in-production` is publicly known and must never be used outside of local development. Stoa will refuse to start with this value.
+:::
+
+## Email Normalization
+
+All email addresses are normalized to **lowercase with trimmed whitespace** before any database lookup, uniqueness check, or brute-force tracking. This prevents inconsistencies between the application layer and the database.
+
+### Why this matters
+
+Without normalization, an attacker could bypass account-level brute-force protection by varying the case of an email address — `user@example.com`, `User@Example.COM`, and `USER@EXAMPLE.COM` would each get their own failure counter, effectively tripling the number of allowed attempts before lockout.
+
+Additionally, case-sensitive email uniqueness checks could allow duplicate accounts for the same mailbox (e.g. `Alice@test.com` and `alice@test.com`).
+
+### How it works
+
+The `auth.NormalizeEmail` function is applied at every entry point that handles emails:
+
+| Layer | Where | Effect |
+|-------|-------|--------|
+| **Login** | Auth handler | Email is normalized before DB lookup and brute-force tracking |
+| **Brute-force tracker** | `IsLocked`, `RecordFailure`, `RecordSuccess` | All case variants map to the same tracker key |
+| **Customer service** | `Create`, `Update`, `GetByEmail`, `VerifyCredentials` | Emails are stored and queried in lowercase |
+| **Admin CLI** | `stoa admin create` | Admin email is normalized before INSERT |
+
+### Database safety net
+
+As an additional safeguard, the database enforces case-insensitive uniqueness via functional indexes:
+
+```sql
+CREATE UNIQUE INDEX idx_admin_users_email_lower ON admin_users (LOWER(email));
+CREATE UNIQUE INDEX idx_customers_email_lower ON customers (LOWER(email));
+```
+
+These indexes replace the original `UNIQUE` constraints on the `email` column. Even if a code path were to skip normalization, the database would reject case-variant duplicates.
+
+::: tip Migration
+Migration `000011_email_case_insensitive` normalizes all existing emails to lowercase and creates the functional indexes. Run `stoa migrate up` to apply.
 :::
 
 ## Authentication

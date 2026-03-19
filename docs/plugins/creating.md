@@ -187,7 +187,7 @@ Key conventions:
 
 - **Tool names** must use the prefix `store_{pluginName}_` (e.g. `store_myplugin_action`). The MCP server enforces this.
 - **Interface assertion**: use `srv.(toolAdder)` — not `srv.(*server.MCPServer)`. The server passes a scoped wrapper.
-- **Store-scoped client**: the `client` only allows requests to `/api/v1/store/*` paths.
+- **Store-scoped client**: the `client` only allows requests to `/api/v1/store/*` paths. Paths are URL-decoded and normalized before the prefix check, so percent-encoded traversal sequences (`%2e%2e`, `%2f`) are also rejected.
 - **Sanitize errors**: return generic messages to MCP consumers — do not leak internal details via `err.Error()`.
 
 ::: info No changes to the MCP server binary needed

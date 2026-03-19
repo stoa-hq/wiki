@@ -211,7 +211,14 @@ type StoreAPIClient interface {
 }
 ```
 
-The client is restricted to `/api/v1/store/*` paths — attempts to access admin or other endpoints return an error. Path traversal (e.g. `/../admin/`) is also blocked.
+The client is restricted to `/api/v1/store/*` paths. Path validation rejects any attempt to reach admin or other endpoints. The validation pipeline applied to every path argument is:
+
+1. **URL decoding** — the raw path is decoded with `url.PathUnescape` so that percent-encoded traversal sequences such as `%2e%2e` (`..`) or `%2f` (`/`) are expanded before any check is made.
+2. **Path normalization** — `path.Clean` resolves `.`, `..`, and double slashes on the decoded path.
+3. **Prefix enforcement** — the cleaned path must start with `/api/v1/store/`; anything else returns `access denied`.
+4. **Defense-in-depth** — a final `..` substring check on the cleaned path guards against any remaining traversal attempt.
+
+This prevents double-encoding bypass attacks where a raw path such as `/api/v1/store/%2e%2e/admin/users` would pass a naive prefix check but resolve to `/api/v1/admin/users` after the HTTP server decodes it.
 
 ### Plugin isolation
 
