@@ -2,7 +2,7 @@
 
 Stoa ships two MCP servers: **stoa-admin-mcp** (full admin access) and **stoa-store-mcp** (storefront operations). Each tool maps to a REST API endpoint.
 
-## Admin MCP Tools (41)
+## Admin MCP Tools (49)
 
 ### Products (8)
 
@@ -52,6 +52,32 @@ Stoa ships two MCP servers: **stoa-admin-mcp** (full admin access) and **stoa-st
 | `admin_get_category` | Get category details |
 | `admin_create_category` | Create a category |
 | `admin_update_category` | Update a category |
+
+### Property Groups (5)
+
+Property groups define product properties like "Color" or "Size". Each group contains options (e.g. "Red", "Blue") that can be assigned to product variants.
+
+| Tool | Description |
+|------|-------------|
+| `admin_list_property_groups` | List all property groups with their options |
+| `admin_get_property_group` | Get a property group with its options |
+| `admin_create_property_group` | Create a new property group (e.g. Color, Size) |
+| `admin_update_property_group` | Update a property group |
+| `admin_delete_property_group` | Delete a property group and all its options |
+
+### Property Options (3)
+
+Options are the selectable values within a property group. They are linked to product variants via `option_ids`.
+
+| Tool | Description |
+|------|-------------|
+| `admin_create_property_option` | Create an option within a group (e.g. Red, XL) |
+| `admin_update_property_option` | Update an option (name, position, color) |
+| `admin_delete_property_option` | Delete an option |
+
+::: tip Color swatches
+Use the `color_hex` parameter (e.g. `#FF0000`) when creating or updating color options to enable visual swatches in the storefront.
+:::
 
 ### Tags (3)
 
