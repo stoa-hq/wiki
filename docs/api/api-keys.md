@@ -184,6 +184,127 @@ For Claude Desktop or other MCP clients, add the key to the server configuration
 When creating a key for the MCP server, use the **MCP Full Access** preset in the Admin Panel to grant all permissions. This ensures the MCP server can perform any admin operation.
 :::
 
+## Store API Keys (Customer)
+
+Customers can create their own API keys to allow AI agents and integrations to act on their behalf. Store keys use the prefix `sk_` and are scoped to store-level permissions only.
+
+### Key Format
+
+```
+sk_a1b2c3d4e5f6...  (67 characters total)
+```
+
+### Authentication
+
+```bash
+curl http://localhost:8080/api/v1/store/products \
+  -H 'Authorization: ApiKey sk_your_store_key_here'
+```
+
+### Create
+
+Requires customer JWT authentication. Maximum **5 active keys** per customer.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/store/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "My Shopping Agent",
+    "permissions": ["store.products.read", "store.cart.manage", "store.checkout"]
+  }'
+```
+
+**Response (201):**
+
+```json
+{
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "My Shopping Agent",
+    "key": "sk_a1b2c3d4e5f6...",
+    "key_type": "store",
+    "permissions": ["store.products.read", "store.cart.manage", "store.checkout"],
+    "active": true,
+    "customer_id": "customer-uuid",
+    "created_at": "2026-03-22T12:00:00Z"
+  }
+}
+```
+
+::: warning Save the key immediately
+The raw key (`sk_...`) is returned **only once**. Store it securely — it cannot be retrieved later.
+:::
+
+### List
+
+```bash
+curl http://localhost:8080/api/v1/store/api-keys \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response (200):**
+
+```json
+{
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "My Shopping Agent",
+      "key_type": "store",
+      "permissions": ["store.products.read", "store.cart.manage", "store.checkout"],
+      "active": true,
+      "customer_id": "customer-uuid",
+      "last_used_at": "2026-03-22T14:30:00Z",
+      "created_at": "2026-03-22T12:00:00Z"
+    }
+  ]
+}
+```
+
+### Revoke
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/store/api-keys/{id} \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Customers can only revoke their own keys.
+
+### Store Permissions
+
+| Permission | Description |
+|-----------|-------------|
+| `store.products.read` | Browse products and categories |
+| `store.cart.manage` | Create carts, add/remove/update items |
+| `store.checkout` | Complete checkout and place orders |
+| `store.account.read` | View account details |
+| `store.account.update` | Update account information |
+| `store.orders.read` | View order history |
+
+### Limits
+
+- Maximum **5 active keys** per customer (admin keys allow 10)
+- Store keys can only access `/api/v1/store/*` endpoints
+- Permissions are validated against the available store permission set
+
+### MCP Store Server Usage
+
+Store API keys are designed for the Store MCP Server, enabling AI agents to shop on a customer's behalf:
+
+```json
+{
+  "mcpServers": {
+    "stoa-store": {
+      "command": "./stoa-store-mcp",
+      "env": {
+        "STOA_MCP_API_KEY": "sk_your_store_key_here"
+      }
+    }
+  }
+}
+```
+
 ## Admin Panel
 
 The Admin Panel provides a graphical interface for API key management under **API Keys** in the sidebar.
@@ -193,3 +314,13 @@ The Admin Panel provides a graphical interface for API key management under **AP
 3. **View**: The table shows all your keys with name, permission count, status, last used date, and creation date
 4. **Revoke**: Click "Revoke" on any active key to permanently disable it
 5. **Super Admin**: Toggle "Show all keys" to see keys from all users
+
+## Storefront
+
+Customers can manage their store API keys from the Storefront under **Account → API Keys** (`/account/api-keys`).
+
+1. **Create**: Click "Create New Key", enter a name, select permissions, and click "Create"
+2. **Copy**: The raw key is displayed once in a green banner — copy it immediately
+3. **View**: Keys are shown as cards with name, creation date, last used date, and permission badges
+4. **Revoke**: Click "Revoke" on any key to permanently disable it
+5. **Limit**: A warning is shown when the 5-key maximum is reached
