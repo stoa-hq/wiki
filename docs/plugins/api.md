@@ -16,12 +16,15 @@ type Plugin interface {
 
 ```go
 type AppContext struct {
-    DB     *pgxpool.Pool           // PostgreSQL connection pool
-    Router chi.Router              // HTTP router for custom endpoints
-    Hooks  *HookRegistry           // Event system
-    Config map[string]interface{}  // Plugin-specific config from config.yaml
-    Logger zerolog.Logger          // Structured logger
-    Auth   *AuthHelper             // Authentication middleware and context helpers
+    DB           *pgxpool.Pool           // PostgreSQL connection pool
+    Router       chi.Router              // HTTP router for custom endpoints
+    AssetRouter  chi.Router              // Mounted under /plugins/{name}/assets/
+    Hooks        *HookRegistry           // Event system
+    Config       map[string]interface{}  // Plugin-specific config from config.yaml
+    Logger       zerolog.Logger          // Structured logger
+    Auth         *AuthHelper             // Authentication middleware and context helpers
+    CheckoutFn   CheckoutFn              // Programmatic checkout (see below)
+    SecureCookie bool                    // true when running behind HTTPS
 }
 ```
 
@@ -31,12 +34,15 @@ The `Auth` field provides authentication middleware and context helpers so plugi
 
 ```go
 type AuthHelper struct {
-    OptionalAuth func(http.Handler) http.Handler  // Extracts auth if present, never blocks
-    Required     func(http.Handler) http.Handler  // Requires valid token, returns 401 otherwise
-    UserID       func(ctx context.Context) uuid.UUID // Authenticated user ID from context
-    UserType     func(ctx context.Context) string    // "admin", "customer", or "api_key"
+    OptionalAuth func(http.Handler) http.Handler           // Extracts auth if present, never blocks
+    Required     func(http.Handler) http.Handler           // Requires valid token, returns 401 otherwise
+    RequireRole  func(roles ...string) func(http.Handler) http.Handler // Requires one of the given roles
+    UserID       func(ctx context.Context) uuid.UUID       // Authenticated user ID from context
+    UserType     func(ctx context.Context) string          // "admin", "customer", or "api_key"
 }
 ```
+
+Valid role strings for `RequireRole`: `"super_admin"`, `"admin"`, `"manager"`, `"customer"`, `"api_client"`.
 
 ### Usage
 
@@ -60,6 +66,92 @@ func (p *Plugin) handleAction(auth *sdk.AuthHelper) http.HandlerFunc {
 ::: tip Use auth for store-facing routes
 The plugin router is the root Chi router — it does **not** inherit the `OptionalAuth` middleware from Stoa's `/api/v1/store/*` group. Always apply `app.Auth.Required` or `app.Auth.OptionalAuth` explicitly to your plugin's store-facing routes.
 :::
+
+## CheckoutFn
+
+`CheckoutFn` lets plugins trigger a full server-side checkout programmatically without making an HTTP call back into the server. All server-side enforcement runs: price validation, tax calculation, stock deduction, and checkout hooks.
+
+```go
+type CheckoutFn func(ctx context.Context, customerID *uuid.UUID, req json.RawMessage) (json.RawMessage, error)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `ctx` | `context.Context` | Request context |
+| `customerID` | `*uuid.UUID` | Authenticated customer ID; `nil` for guest checkouts |
+| `req` | `json.RawMessage` | JSON-encoded checkout request (see fields below) |
+
+The `req` payload follows the same shape as `POST /api/v1/store/checkout`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `currency` | `string` | ISO 4217 currency code, e.g. `"EUR"` |
+| `items` | `array` | Line items with `variant_id` and `quantity` |
+| `shipping_address` | `object` | Shipping address |
+| `billing_address` | `object` | Billing address |
+| `shipping_method_id` | `string` | UUID of the selected shipping method |
+| `payment_method_id` | `string` | UUID of the selected payment method |
+| `payment_reference` | `string` | Provider-side payment reference (e.g. Stripe PaymentIntent ID) |
+
+The return value is a JSON-encoded order response: `{"data": {"id": "uuid", "guest_token": "...", ...}}`.
+
+### Use case
+
+Payment plugins that use an asynchronous payment flow (e.g. payment links, hosted pages) receive the payment confirmation via a webhook *after* the customer has already left the checkout page. At that point there is no active checkout session to finalize. `CheckoutFn` solves this: the plugin validates the provider webhook, reconstructs the checkout parameters, and creates the order in one call.
+
+### Example
+
+```go
+func (p *Plugin) Init(app *sdk.AppContext) error {
+    app.Router.Post("/api/v1/store/myplugin/complete", func(w http.ResponseWriter, r *http.Request) {
+        // ... validate payment provider signature ...
+
+        checkoutReq, _ := json.Marshal(map[string]any{
+            "currency":           "EUR",
+            "items":              items,
+            "shipping_address":   addr,
+            "billing_address":    addr,
+            "payment_method_id":  pmID,
+            "shipping_method_id": smID,
+            "payment_reference":  paymentIntentID,
+        })
+
+        result, err := app.CheckoutFn(r.Context(), customerID, checkoutReq)
+        if err != nil {
+            http.Error(w, "checkout failed", http.StatusUnprocessableEntity)
+            return
+        }
+        // result contains the created order as JSON
+        w.Header().Set("Content-Type", "application/json")
+        w.Write(result)
+    })
+    return nil
+}
+```
+
+::: tip Guest checkouts
+Pass `nil` as `customerID` for unauthenticated (guest) checkouts. The returned order response will include a `guest_token` that the client can use to look up the order later.
+:::
+
+::: warning Webhook goroutines
+If you call `CheckoutFn` from a goroutine spawned inside a webhook handler, use `context.Background()` with a timeout rather than the request context — the request context is cancelled when the HTTP response is sent.
+:::
+
+## SecureCookie
+
+`SecureCookie` reflects the server's HTTPS configuration (`security.csrf.secure` in `config.yaml`). Plugins should propagate this value to any cookie they set so that the `Secure` flag matches the deployment environment.
+
+```go
+http.SetCookie(w, &http.Cookie{
+    Name:     "my_token",
+    Value:    token,
+    Secure:   app.SecureCookie, // Follows server HTTPS configuration
+    HttpOnly: true,
+    SameSite: http.SameSiteLaxMode,
+})
+```
+
+Hard-coding `Secure: true` breaks local development (HTTP). Hard-coding `Secure: false` is a security regression in production. Always use `app.SecureCookie`.
 
 ## HookRegistry
 

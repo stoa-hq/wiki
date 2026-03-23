@@ -202,7 +202,7 @@ Requires authentication. Returns the plugin status and the publishable key.
 
 ## MCP Tools
 
-The plugin adds two tools to the Store MCP server:
+The plugin adds four tools to the Store MCP server:
 
 ### `store_stripe_create_preorder_payment_intent`
 
@@ -231,6 +231,44 @@ Creates a Stripe PaymentIntent for an existing pending order (legacy flow). Retu
   "publishable_key": "pk_live_...",
   "amount": 4999,
   "currency": "eur"
+}
+```
+
+### `store_stripe_create_payment_link`
+
+Creates a payment link URL that the customer can open in a browser to enter card details. Use this in chat/MCP contexts where Stripe.js is not available. The link expires after 30 minutes. The server calculates the total automatically from cart items and the selected shipping method — no amount is required from the caller.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `cart_id` | string (UUID) | Yes | Cart ID |
+| `payment_method_id` | string (UUID) | Yes | Stoa PaymentMethod UUID for Stripe |
+| `shipping_method_id` | string (UUID) | Yes | Shipping method UUID |
+| `shipping_address` | object | Yes | `{ first_name, last_name, street, city, zip, country }` |
+| `billing_address` | object | No | Same fields. If omitted, shipping address is used |
+| `email` | string | No | Customer email for receipt |
+
+**Returns:**
+```json
+{
+  "payment_url": "/plugins/stripe/pay/abc123...",
+  "payment_intent_id": "pi_3ABC...",
+  "expires_at": "2026-03-22T15:30:00Z"
+}
+```
+
+### `store_stripe_check_payment_status`
+
+Checks the current status of a Stripe payment. Use this to poll whether the customer has completed payment after receiving a payment link.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `payment_intent_id` | string | Yes | Stripe PaymentIntent ID to check |
+
+**Returns:**
+```json
+{
+  "status": "requires_capture",
+  "payment_link_status": "completed"
 }
 ```
 
@@ -359,6 +397,10 @@ Full end-to-end purchase with Claude (or any MCP-compatible agent):
    → Order created → capture triggered → order confirmed
 ```
 
+::: tip Payment Links for Chat-based Agents
+If the agent is chatting with the customer (e.g. via MCP) and Stripe.js is not available, use `store_stripe_create_payment_link` instead of `store_stripe_create_preorder_payment_intent`. This generates a URL the customer can open in their browser to complete payment. See [Payment Links](#payment-links).
+:::
+
 ### Legacy Flow
 
 ```
@@ -375,6 +417,171 @@ Full end-to-end purchase with Claude (or any MCP-compatible agent):
 
 ::: info Saved payment methods
 For a fully autonomous agent flow without user interaction, use [Stripe's off-session payments](https://stripe.com/docs/payments/save-and-reuse) with a saved payment method ID. The agent can confirm the PaymentIntent server-side using the Stripe API directly.
+:::
+
+## Payment Links (for MCP Agents) {#payment-links}
+
+When an AI agent chats with a customer via MCP, the agent can create a cart and collect shipping details — but the customer cannot enter card details in a chat. The **Payment Links** feature bridges this gap by generating a URL the agent can share.
+
+### Flow
+
+```
+Agent: [store_create_cart, store_add_to_cart, collects address]
+Agent: [store_stripe_create_payment_link] → gets URL
+Agent: "Please click here to pay: https://shop.example.com/plugins/stripe/pay/abc123..."
+Customer: [clicks link, enters card, pays]
+         → Browser calls /complete → payment confirmed
+Agent: [store_stripe_check_payment_status] → "Payment confirmed!"
+```
+
+### How it works
+
+1. The agent calls `store_stripe_create_payment_link` with cart, shipping, and payment details. The server calculates the total from cart items + shipping costs.
+2. The plugin calculates the total server-side by querying product/variant prices and the shipping method price from the database, then creates a Stripe PaymentIntent with the correct amount (`capture_method: manual`) and generates a 256-bit random token
+3. A payment link record is stored in `stripe_payment_links` with 30-minute expiry
+4. The agent shares the returned URL with the customer
+5. The customer opens the URL → the plugin serves a standalone HTML payment page at `/plugins/stripe/pay/{token}`
+6. The page fetches payment data via `GET /api/v1/store/stripe/payment-link/{token}` and mounts Stripe Elements
+7. After successful payment, the browser calls `POST /api/v1/store/stripe/payment-link/{token}/complete`
+8. The agent polls `store_stripe_check_payment_status` to confirm
+
+::: info Server-side price enforcement
+The payment link total is always calculated server-side from the current product/variant prices and shipping method price in the database. This prevents price manipulation — the `amount` cannot be specified by the client. The currency is taken from the plugin configuration (`currency` in `config.yaml`).
+:::
+
+### API Endpoints
+
+**`POST /api/v1/store/stripe/payment-link`** (OptionalAuth)
+
+Creates a payment link. Request body:
+```json
+{
+  "cart_id": "018e1b2c-...",
+  "payment_method_id": "018e1b2c-...",
+  "shipping_method_id": "018e1b2c-...",
+  "shipping_address": { "first_name": "Max", "last_name": "Mustermann", "street": "Musterstr. 1", "city": "Berlin", "zip": "10115", "country": "DE" },
+  "email": "max@example.com"
+}
+```
+
+Response (`201 Created`):
+```json
+{
+  "data": {
+    "payment_url": "/plugins/stripe/pay/abc123...",
+    "payment_intent_id": "pi_3ABC...",
+    "expires_at": "2026-03-22T15:30:00Z"
+  }
+}
+```
+
+**`GET /api/v1/store/stripe/payment-link/{token}`** (No auth — token is capability)
+
+Returns public payment data. No sensitive data (addresses) exposed.
+
+Response (`200 OK`):
+```json
+{
+  "data": {
+    "client_secret": "pi_3ABC..._secret_xyz",
+    "publishable_key": "pk_test_...",
+    "amount": 2489,
+    "currency": "EUR",
+    "email": "max@example.com"
+  }
+}
+```
+
+Error responses: `404` if token not found, `410 Gone` if expired or already used.
+
+**`POST /api/v1/store/stripe/payment-link/{token}/complete`** (No auth)
+
+Validates payment and triggers a full server-side checkout. On completion, the server runs `CheckoutFn`, which creates the order, deducts stock, and processes all registered hooks (including payment capture). The link is then marked as completed and cannot be reused.
+
+Request:
+```json
+{ "payment_intent_id": "pi_3ABC..." }
+```
+
+Response (`200 OK`):
+```json
+{
+  "data": {
+    "status": "completed",
+    "payment_intent_id": "pi_3ABC...",
+    "order_id": "018e1b2c-..."
+  }
+}
+```
+
+Validates: token exists + pending + not expired + PI ID matches + Stripe PI status is `requires_capture` or `succeeded`.
+
+**`GET /api/v1/store/stripe/payment-status/{paymentIntentID}`** (OptionalAuth)
+
+Returns current Stripe PI status and associated payment link status (if any).
+
+Response:
+```json
+{
+  "data": {
+    "status": "requires_capture",
+    "payment_link_status": "completed"
+  }
+}
+```
+
+### Payment Page
+
+The plugin serves a standalone HTML payment page at `/plugins/stripe/pay/{token}`. This page:
+- Is self-contained — no SvelteKit or Core dependency
+- Loads Stripe.js dynamically
+- Renders Stripe Payment Element for card input
+- Handles the full confirm → complete → redirect flow
+- Shows appropriate error states for expired/used/invalid links
+
+::: info No Core dependency
+The payment page is embedded in the Stripe plugin binary via Go's `embed.FS`. Stoa Core has zero knowledge of Stripe — the loose coupling is fully maintained.
+:::
+
+### Security
+
+- **Token = 256-bit entropy** (32 bytes, base64url-encoded, 43 characters) — not guessable
+- **30-minute expiry** — the agent should inform the customer about the time limit
+- **Single-use** — `UPDATE WHERE status='pending'` prevents reuse (atomic)
+- **PI verification** — the `/complete` endpoint verifies the PaymentIntent ID matches and checks Stripe PI status
+- **No addresses in browser** — shipping/billing addresses stay server-side, never sent to the payment page
+- **CSRF safe** — the token-based endpoints don't use cookies for auth
+- **Race condition prevention** — The `/complete` endpoint uses an atomic `UPDATE ... WHERE status = 'pending'` as a distributed lock before running the checkout. Only one concurrent request can claim a payment link. If the checkout fails, the link is reverted to `pending` for retry.
+- **IDOR protection on payment status** — `GET /payment-status/{paymentIntentID}` verifies ownership: authenticated users must match the `stoa_customer_id` in PaymentIntent metadata; guests must provide a matching `stoa_guest_token` via header or cookie. Unauthorized requests receive `404`.
+- **Error sanitization** — Checkout errors return a generic `"checkout failed"` message to the client. Internal error details (database messages, stack traces) are only written to the server log.
+- **Amount mismatch detection** — After checkout, the server compares the order total with the PaymentIntent amount. If they differ (e.g. due to a price change between link creation and completion), a warning is logged for manual review.
+
+### Complete Agent Example
+
+```
+1. store_create_cart() → cart_id
+2. store_add_to_cart(cart_id, variant_id, 1)
+3. store_get_shipping_methods() → pick shipping_method_id
+4. store_get_payment_methods() → find Stripe payment_method_id
+5. store_stripe_create_payment_link(
+     cart_id,
+     payment_method_id, shipping_method_id,
+     shipping_address: { first_name: "Max", ... },
+     email: "max@example.com"
+   )
+   → payment_url: "/plugins/stripe/pay/abc123..."
+   → payment_intent_id: "pi_3ABC..."
+
+   Agent sends URL to customer in chat.
+
+6. Customer clicks link → enters card → pays
+7. store_stripe_check_payment_status(payment_intent_id: "pi_3ABC...")
+   → status: "requires_capture", payment_link_status: "completed"
+   → Agent confirms: "Payment received! Your order will be processed."
+```
+
+::: tip Test cards
+Use `4242 4242 4242 4242` with any future expiry date and any CVC in test mode.
 :::
 
 ## Payment event hooks

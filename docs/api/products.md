@@ -251,13 +251,36 @@ Property groups define the axes for variants (e.g. "Size", "Color"). Options are
 GET /api/v1/admin/property-groups
 ```
 
-Returns all property groups with their options and translations.
+Returns all property groups with their options and translations. Each item includes the `identifier` field.
+
+**Response example:**
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "identifier": "shoe-size",
+      "position": 0,
+      "created_at": "2026-03-15T10:00:00Z",
+      "updated_at": "2026-03-15T10:00:00Z",
+      "translations": [
+        { "locale": "en", "name": "Size" },
+        { "locale": "de", "name": "Größe" }
+      ],
+      "options": []
+    }
+  ]
+}
+```
 
 ### Get Property Group
 
 ```http
 GET /api/v1/admin/property-groups/:id
 ```
+
+Returns a single property group including `identifier`, translations, and all options.
 
 ### Create Property Group
 
@@ -267,6 +290,7 @@ POST /api/v1/admin/property-groups
 
 ```json
 {
+  "identifier": "shoe-size",
   "position": 0,
   "translations": [
     { "locale": "en", "name": "Size" },
@@ -275,7 +299,20 @@ POST /api/v1/admin/property-groups
 }
 ```
 
-**Response:** `201 Created`
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `identifier` | string | Yes | Unique slug: lowercase alphanumeric, hyphens, underscores (e.g. `color`, `shoe-size`). Pattern: `^[a-z0-9][a-z0-9_-]*$` |
+| `position` | int | No | Sort order |
+| `translations` | array | Yes | At least one translation required |
+
+**Response:** `201 Created` with the full property group object, including `identifier`.
+
+**Error responses:**
+
+| Status | Error code | Condition |
+|--------|-----------|-----------|
+| `409 Conflict` | `duplicate_identifier` | Another property group already uses this identifier |
+| `422 Unprocessable Entity` | `invalid_identifier` | Identifier does not match the required pattern |
 
 ### Update Property Group
 
@@ -283,7 +320,7 @@ POST /api/v1/admin/property-groups
 PUT /api/v1/admin/property-groups/:id
 ```
 
-Same body as create. **Response:** `200 OK`
+Same body as [Create Property Group](#create-property-group). All fields including `identifier` are required. **Response:** `200 OK`
 
 ### Delete Property Group
 
